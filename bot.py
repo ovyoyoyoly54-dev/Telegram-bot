@@ -12,6 +12,7 @@ URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "openai/gpt-oss-120b"
 VISION_MODEL = "qwen/qwen3.8-27b"
 IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+EDIT_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
 
 SYSTEM = {
     "role": "system",
@@ -22,6 +23,10 @@ MAX_HISTORY = 10
 history = {}
 
 bot = telebot.TeleBot(TOKEN)
+
+def cf_url(model):
+    return ("https://api.cloudflare.com/client/v4/accounts/"
+            + CF_ACCOUNT_ID + "/ai/run/" + model)
 
 def call_groq(model, messages):
     r = requests.post(
@@ -46,29 +51,53 @@ def remember(chat_id, user_text, answer):
     h.append({"role": "assistant", "content": answer})
     del h[:-MAX_HISTORY]
 
+def pick_image(data):
+    result = data.get("result") or {}
+    b64 = result.get("image") or data.get("image")
+    if not b64:
+        raise KeyError("image topilmadi")
+    return base64.b64decode(b64)
+
 def make_image(prompt):
-    url = ("https://api.cloudflare.com/client/v4/accounts/"
-           + CF_ACCOUNT_ID + "/ai/run/" + IMAGE_MODEL)
     r = requests.post(
-        url,
+        cf_url(IMAGE_MODEL),
         headers={"Authorization": "Bearer " + CF_API_TOKEN},
         json={"prompt": prompt},
         timeout=120,
     )
     data = r.json()
     try:
-        return base64.b64decode(data["result"]["image"])
+        return pick_image(data)
     except Exception:
         print("Cloudflare xato:", r.status_code, data)
         raise Exception("Cloudflare xato berdi")
+
+def edit_image(img_bytes, prompt):
+    r = requests.post(
+        cf_url(EDIT_MODEL),
+        headers={"Authorization": "Bearer " + CF_API_TOKEN},
+        files={
+            "prompt": (None, prompt),
+            "input_image_0": ("image.jpg", img_bytes, "image/jpeg"),
+        },
+        timeout=180,
+    )
+    try:
+        data = r.json()
+        return pick_image(data)
+    except Exception:
+        print("Cloudflare tahrir xato:", r.status_code, r.text[:500])
+        raise Exception("Cloudflare tahrir xato berdi")
 
 @bot.message_handler(commands=["start"])
 def start(m):
     history.pop(m.chat.id, None)
     bot.reply_to(
         m,
-        "Salom! Savol bering, rasm yuboring yoki rasm yaratish uchun "
-        "/rasm va tavsif yozing (masalan: /rasm sunset over the sea).",
+        "Salom! Savol bering yoki rasm yuboring.\n"
+        "/rasm tavsif - yangi rasm yaratadi\n"
+        "Rasm tagiga /tahrir va buyruq yozsangiz, rasmni o'zgartiradi "
+        "(masalan: /tahrir make the sky purple).",
     )
 
 @bot.message_handler(commands=["rasm"])
@@ -87,11 +116,32 @@ def draw(m):
 
 @bot.message_handler(content_types=["photo"])
 def photo(m):
+    caption = (m.caption or "").strip()
     try:
         info = bot.get_file(m.photo[-1].file_id)
         img = bot.download_file(info.file_path)
+    except Exception as e:
+        print("XATO (yuklash):", e)
+        bot.reply_to(m, "Rasmni yuklab bo'lmadi, qayta urinib ko'ring.")
+        return
+
+    if caption.lower().startswith("/tahrir"):
+        prompt = caption.partition(" ")[2].strip()
+        if not prompt:
+            bot.reply_to(m, "Buyruq yozing: /tahrir make the sky purple")
+            return
+        try:
+            bot.send_chat_action(m.chat.id, "upload_photo")
+            out = edit_image(img, prompt)
+            bot.send_photo(m.chat.id, out, reply_to_message_id=m.message_id)
+        except Exception as e:
+            print("XATO (tahrir):", e)
+            bot.reply_to(m, "Rasmni tahrirlab bo'lmadi, qayta urinib ko'ring.")
+        return
+
+    try:
         b64 = base64.b64encode(img).decode()
-        savol = m.caption or "Bu rasmda nima bor? O'zbek tilida javob ber."
+        savol = caption or "Bu rasmda nima bor? O'zbek tilida javob ber."
         content = [
             {"type": "text", "text": savol},
             {"type": "image_url",
