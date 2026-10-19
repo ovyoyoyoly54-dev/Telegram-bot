@@ -5,10 +5,10 @@ import telebot
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-
+VISION_MODEL = "qwen/qwen3.8-27b"
 URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "openai/gpt-oss-120b"
-VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+
 
 bot = telebot.TeleBot(TOKEN)
 
