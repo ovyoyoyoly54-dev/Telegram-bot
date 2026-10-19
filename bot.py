@@ -5,10 +5,13 @@ import telebot
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+CF_ACCOUNT_ID = os.environ.get("CF_ACCOUNT_ID", "")
+CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "")
 
 URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "openai/gpt-oss-120b"
 VISION_MODEL = "qwen/qwen3.8-27b"
+IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 
 SYSTEM = {
     "role": "system",
@@ -43,10 +46,44 @@ def remember(chat_id, user_text, answer):
     h.append({"role": "assistant", "content": answer})
     del h[:-MAX_HISTORY]
 
+def make_image(prompt):
+    url = ("https://api.cloudflare.com/client/v4/accounts/"
+           + CF_ACCOUNT_ID + "/ai/run/" + IMAGE_MODEL)
+    r = requests.post(
+        url,
+        headers={"Authorization": "Bearer " + CF_API_TOKEN},
+        json={"prompt": prompt},
+        timeout=120,
+    )
+    data = r.json()
+    try:
+        return base64.b64decode(data["result"]["image"])
+    except Exception:
+        print("Cloudflare xato:", r.status_code, data)
+        raise Exception("Cloudflare xato berdi")
+
 @bot.message_handler(commands=["start"])
 def start(m):
     history.pop(m.chat.id, None)
-    bot.reply_to(m, "Salom! Savol bering yoki rasm yuboring.")
+    bot.reply_to(
+        m,
+        "Salom! Savol bering, rasm yuboring yoki rasm yaratish uchun "
+        "/rasm va tavsif yozing (masalan: /rasm sunset over the sea).",
+    )
+
+@bot.message_handler(commands=["rasm"])
+def draw(m):
+    prompt = m.text.partition(" ")[2].strip()
+    if not prompt:
+        bot.reply_to(m, "Tavsif yozing: /rasm quyosh botayotgan dengiz")
+        return
+    try:
+        bot.send_chat_action(m.chat.id, "upload_photo")
+        img = make_image(prompt)
+        bot.send_photo(m.chat.id, img, reply_to_message_id=m.message_id)
+    except Exception as e:
+        print("XATO (rasm yaratish):", e)
+        bot.reply_to(m, "Rasm yaratib bo'lmadi, qayta urinib ko'ring.")
 
 @bot.message_handler(content_types=["photo"])
 def photo(m):
