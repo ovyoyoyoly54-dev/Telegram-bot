@@ -2,8 +2,8 @@ import os
 import requests
 import telebot
 
-TOKEN = os.environ["8959503583:AAF6_GvOOKflps1WKPnBeuuXp8k86X56hj4"]
-GROQ_API_KEY = os.environ["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"]
+TOKEN = os.environ["TELEGRAM_TOKEN"]
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 
 URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "openai/gpt-oss-120b"
