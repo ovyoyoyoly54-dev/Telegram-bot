@@ -2,25 +2,29 @@ import os
 import requests
 import telebot
 
-TOKEN = os.environ["TELEGRAM_TOKEN"]
-GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
+TOKEN = os.environ["8959503583:AAF6_GvOOKflps1WKPnBeuuXp8k86X56hj4"]
+GROQ_API_KEY = os.environ["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"]
 
-URL = ("https://generativelanguage.googleapis.com/v1beta/models/"
-       "gemini-3.8-flash:generateContent?key=" + GOOGLE_API_KEY)
+URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = "openai/gpt-oss-120b"
 
 bot = telebot.TeleBot(TOKEN)
 
 def ask(text):
     r = requests.post(
         URL,
-        json={"contents": [{"parts": [{"text": text}]}]},
+        headers={"Authorization": "Bearer " + GROQ_API_KEY},
+        json={
+            "model": MODEL,
+            "messages": [{"role": "user", "content": text}],
+        },
         timeout=60,
     )
     data = r.json()
-    if "candidates" not in data:
+    if "choices" not in data:
         print(r.status_code, data)
-        raise Exception("Gemini xato berdi")
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+        raise Exception("Groq xato berdi")
+    return data["choices"][0]["message"]["content"][:4000]
 
 @bot.message_handler(commands=["start"])
 def start(m):
@@ -35,4 +39,4 @@ def chat(m):
         bot.reply_to(m, "Xatolik, qayta urinib ko'ring.")
 
 print("AI bot ishga tushdi...")
-bot.infinity_polling() 
+bot.infinity_polling()
