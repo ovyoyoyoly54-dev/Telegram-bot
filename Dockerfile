@@ -20,7 +20,6 @@ COPY . .
 RUN useradd --create-home bot && chown -R bot:bot /app
 USER bot
 
-# Health-check uchun (ixtiyoriy). Bot o'zi Telegram'ga long-polling bilan ulanadi.
 EXPOSE 8080
 
 CMD ["python", "app.py"]
