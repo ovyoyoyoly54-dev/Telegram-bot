@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f172a">
+<link rel="icon" href="/icon.png">
+<title>AI Yordamchi</title>
+<style>
+  :root { --bg:#0f172a; --panel:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --user:#2563eb; --err:#7f1d1d; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .screen { display: flex; flex-direction: column; height: 100dvh; padding-top: env(safe-area-inset-top); }
+  .hidden { display: none !important; }
+  #login { align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; }
+  #login img { width: 84px; height: 84px; border-radius: 22px; }
+  #login h1 { margin: 4px 0 0; font-size: 22px; }
+  input, textarea, select, button { font: inherit; color: inherit; }
+  #pw { width: 100%; max-width: 320px; padding: 13px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); }
+  .btn { padding: 12px 22px; border: 0; border-radius: 12px; background: var(--accent); color: #082f49; font-weight: 600; }
+  #loginErr { color: #fca5a5; min-height: 1.4em; font-size: 14px; }
+  header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header .title { flex: 1; font-weight: 600; }
+  header select, header button { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; }
+  main { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; -webkit-overflow-scrolling: touch; }
+  .empty { margin: auto; text-align: center; color: var(--muted); padding: 20px; font-size: 15px; }
+  .msg { max-width: 88%; padding: 10px 13px; border-radius: 16px; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
+  .user { align-self: flex-end; background: var(--user); border-bottom-right-radius: 4px; }
+  .bot { align-self: flex-start; background: var(--panel); border-bottom-left-radius: 4px; }
+  .err { align-self: center; background: var(--err); font-size: 14px; border-radius: 12px; }
+  .note { align-self: center; background: var(--panel); color: var(--muted); font-size: 13px; border-radius: 12px; }
+  .msg pre { margin: 6px 0; padding: 10px; background: #0b1220; border-radius: 10px; overflow-x: auto; white-space: pre; font-size: 13px; }
+  .msg code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; background: #0b1220; padding: 1px 5px; border-radius: 5px; }
+  .msg pre code { background: none; padding: 0; }
+  .msg img { max-width: 100%; border-radius: 12px; display: block; }
+  .msg a { color: var(--accent); }
+  .dl { display: inline-block; margin-top: 8px; padding: 9px 14px; border-radius: 10px; background: var(--accent); color: #082f49 !important; font-weight: 600; text-decoration: none; }
+  .copy { display: block; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; }
+  .typing span { display: inline-block; width: 7px; height: 7px; margin: 0 2px; border-radius: 50%; background: var(--muted); animation: b 1.2s infinite; }
+  .typing span:nth-child(2) { animation-delay: .2s; } .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes b { 0%, 60%, 100% { opacity: .25; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
+  #chip { margin: 0 12px 6px; padding: 7px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); font-size: 14px; display: flex; gap: 8px; align-items: center; }
+  #chip span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #chip button { background: none; border: 0; color: var(--muted); font-size: 16px; }
+  footer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--line); }
+  footer textarea { flex: 1; resize: none; max-height: 140px; padding: 10px 12px; border-radius: 18px; border: 1px solid var(--line); background: var(--bg); }
+  footer button { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--bg); font-size: 19px; flex: none; }
+  #send { background: var(--accent); color: #082f49; }
+  #send:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+<div id="login" class="screen hidden">
+  <img src="/icon.png" alt="">
+  <h1>AI Yordamchi</h1>
+  <input id="pw" type="password" placeholder="Parol" autocomplete="current-password">
+  <button class="btn" id="loginBtn">Kirish</button>
+  <div id="loginErr"></div>
+</div>
+
+<div id="app" class="screen hidden">
+  <header>
+    <div class="title">🤖 AI Yordamchi</div>
+    <select id="mode" aria-label="Rejim"></select>
+    <button id="clearBtn" title="Suhbatni tozalash">🧹</button>
+  </header>
+  <main id="msgs"></main>
+  <div id="chip" class="hidden"><span id="chipName"></span><button id="chipX" aria-label="Olib tashlash">✕</button></div>
+  <footer>
+    <button id="attach" title="Fayl yoki rasm">📎</button>
+    <input id="file" type="file" hidden>
+    <textarea id="input" rows="1" placeholder="Xabar yozing..."></textarea>
+    <button id="send" title="Yuborish">➤</button>
+  </footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const TOK = "ai_token", LOG = "ai_log";
+let token = localStorage.getItem(TOK) || "";
+let pending = null, busy = false, log = [];
+try { log = JSON.parse(localStorage.getItem(LOG) || "[]"); } catch (e) { log = []; }
+
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function inline(s) {
+  return s.replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[\s(])\*(?![\s*])(.+?)(?<![\s*])\*(?![\w*])/g, "$1<i>$2</i>")
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)"]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function md(src) {
+  return src.split(/(```[\s\S]*?```)/g).map(p => {
+    if (p.length >= 6 && p.startsWith("```") && p.endsWith("```")) {
+      const body = p.slice(3, -3).replace(/^[\w+#.-]*\n/, "").replace(/^\n|\n$/g, "");
+      return "<pre><code>" + esc(body) + "</code></pre>";
+    }
+    return esc(p).split("\n").map(line => {
+      let m;
+      if ((m = line.match(/^\s{0,3}#{1,6}\s+(.*)$/))) return "<b>" + inline(m[1]) + "</b>";
+      if ((m = line.match(/^(\s*)[*\-+]\s+(.*)$/))) return m[1] + "• " + inline(m[2]);
+      return inline(line);
+    }).join("\n");
+  }).join("");
+}
+
+function show(name) {
+  ["login", "app"].forEach(id => $("#" + id).classList.toggle("hidden", id !== name));
+}
+function logout() { token = ""; localStorage.removeItem(TOK); show("login"); }
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ Authorization: "Bearer " + token }, opts.headers || {});
+  const r = await fetch(path, Object.assign({}, opts, { headers }));
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (r.status === 401) { logout(); throw new Error("Qayta kiring"); }
+  if (!r.ok) throw new Error(data.error || "Xatolik (" + r.status + ")");
+  return data;
+}
+
+function render(m) {
+  const d = document.createElement("div");
+  d.className = "msg " + (m.role === "user" ? "user" : m.role === "err" ? "err" : m.role === "note" ? "note" : "bot");
+  if (m.role === "bot" && m.kind === "image") {
+    d.innerHTML = '<img src="' + m.url + '" alt="rasm"><a class="dl" href="' + m.url + '" download>⬇️ Yuklab olish</a>';
+  } else if (m.role === "bot" && m.kind === "file") {
+    d.innerHTML = "📄 <b>" + esc(m.name || "fayl") + "</b>\n" + esc(m.text || "") +
+      '\n<a class="dl" href="' + m.url + '" download>⬇️ Yuklab olish</a>';
+  } else if (m.role === "bot") {
+    d.innerHTML = md(m.text || "");
+    const c = document.createElement("button");
+    c.className = "copy"; c.textContent = "Nusxa olish";
+    c.onclick = () => { navigator.clipboard && navigator.clipboard.writeText(m.text || ""); c.textContent = "Nusxalandi ✓"; };
+    d.appendChild(c);
+  } else {
+    d.textContent = m.text || "";
+  }
+  return d;
+}
+function scrollDown() { const m = $("#msgs"); m.scrollTop = m.scrollHeight; }
+function addMsg(m) {
+  log.push(m);
+  localStorage.setItem(LOG, JSON.stringify(log.slice(-60)));
+  const box = $("#msgs");
+  const e = box.querySelector(".empty"); if (e) e.remove();
+  box.appendChild(render(m)); scrollDown();
+}
+function paint() {
+  const box = $("#msgs"); box.innerHTML = "";
+  if (!log.length) {
+    box.innerHTML = '<div class="empty">Savol yozing, rasm yoki fayl yuboring.<br><br>' +
+      "Masalan: «5 ta mijoz jadvalini excelda tayyorla» yoki «sun'iy intellekt haqida 8 slaydli taqdimot qil»</div>";
+    return;
+  }
+  log.forEach(m => box.appendChild(render(m))); scrollDown();
+}
+
+async function enter() {
+  show("app");
+  paint();
+  try {
+    const st = await api("/api/state");
+    $("#mode").innerHTML = st.modes.map(x => '<option value="' + x.key + '">' + esc(x.title) + "</option>").join("");
+    $("#mode").value = st.mode;
+  } catch (e) { /* login ekraniga o'tgan bo'lishi mumkin */ }
+}
+
+async function doLogin() {
+  $("#loginErr").textContent = "";
+  try {
+    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: $("#pw").value }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "Xatolik");
+    token = data.token; localStorage.setItem(TOK, token); $("#pw").value = ""; enter();
+  } catch (e) { $("#loginErr").textContent = e.message; }
+}
+
+function setPending(f) {
+  pending = f;
+  $("#chip").classList.toggle("hidden", !f);
+  $("#chipName").textContent = f ? "📎 " + f.name : "";
+}
+function grow() { const t = $("#input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 140) + "px"; }
+
+async function send() {
+  if (busy) return;
+  const text = $("#input").value.trim();
+  if (!text && !pending) return;
+  busy = true; $("#send").disabled = true;
+  addMsg({ role: "user", text: (pending ? "📎 " + pending.name + (text ? "\n" : "") : "") + text });
+  $("#input").value = ""; grow();
+  const typing = document.createElement("div");
+  typing.className = "msg bot typing"; typing.innerHTML = "<span></span><span></span><span></span>";
+  $("#msgs").appendChild(typing); scrollDown();
+  try {
+    let res;
+    if (pending) {
+      const fd = new FormData(); fd.append("file", pending); fd.append("text", text);
+      res = await api("/api/upload", { method: "POST", body: fd });
+      setPending(null);
+    } else {
+      res = await api("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    }
+    typing.remove();
+    if (res.notice) addMsg({ role: "note", text: res.notice });
+    addMsg({ role: "bot", kind: res.kind, text: (res.text || "").slice(0, 6000), url: res.url, name: res.name });
+  } catch (e) {
+    typing.remove(); addMsg({ role: "err", text: e.message });
+  } finally { busy = false; $("#send").disabled = false; }
+}
+
+$("#loginBtn").onclick = doLogin;
+$("#pw").onkeydown = e => { if (e.key === "Enter") doLogin(); };
+$("#send").onclick = send;
+$("#attach").onclick = () => $("#file").click();
+$("#file").onchange = e => { if (e.target.files[0]) setPending(e.target.files[0]); e.target.value = ""; };
+$("#chipX").onclick = () => setPending(null);
+$("#input").oninput = grow;
+$("#input").onkeydown = e => {
+  if (e.key === "Enter" && !e.shiftKey && !/Android|iPhone|iPad/i.test(navigator.userAgent)) { e.preventDefault(); send(); }
+};
+$("#mode").onchange = async e => { try { await api("/api/mode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: e.target.value }) }); } catch (err) { addMsg({ role: "err", text: err.message }); } };
+$("#clearBtn").onclick = async () => {
+  if (!confirm("Suhbat va yuklangan fayl tozalansinmi?")) return;
+  try { await api("/api/clear", { method: "POST" }); } catch (e) {}
+  log = []; localStorage.removeItem(LOG); setPending(null); paint();
+};
+
+if (token) enter(); else show("login");
+</script>
+</body>
+</html>
