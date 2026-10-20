@@ -1,0 +1,330 @@
+# AI Yordamchi APK ni GitHub'ning o'zida yig'adi. Android loyihasi shu fayl ichida,
+# shuning uchun repoga boshqa fayl yuklash shart emas.
+# Ishga tushirish: GitHub -> Actions -> "Build APK" -> Run workflow.
+# Tayyor bo'lgach: repo sahifasi -> Releases -> AI-Yordamchi.apk
+name: Build APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Android loyihasini tayyorlash
+        run: |
+          set -e
+          mkdir -p "$(dirname android/settings.gradle)"
+          cat > android/settings.gradle <<'EOF_FILE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "AIYordamchi"
+          include ':app'
+          EOF_FILE
+          mkdir -p "$(dirname android/build.gradle)"
+          cat > android/build.gradle <<'EOF_FILE'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          EOF_FILE
+          mkdir -p "$(dirname android/gradle.properties)"
+          cat > android/gradle.properties <<'EOF_FILE'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          android.nonTransitiveRClass=true
+          EOF_FILE
+          mkdir -p "$(dirname android/app/build.gradle)"
+          cat > android/app/build.gradle <<'EOF_FILE'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'app.aiyordamchi'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "app.aiyordamchi"
+                  minSdk 29
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF_FILE
+          mkdir -p "$(dirname android/app/src/main/AndroidManifest.xml)"
+          cat > android/app/src/main/AndroidManifest.xml <<'EOF_FILE'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+
+              <application
+                  android:allowBackup="false"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="AI Yordamchi"
+                  android:usesCleartextTraffic="false"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF_FILE
+          mkdir -p "$(dirname android/app/src/main/java/app/aiyordamchi/MainActivity.java)"
+          cat > android/app/src/main/java/app/aiyordamchi/MainActivity.java <<'EOF_FILE'
+          package app.aiyordamchi;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.app.DownloadManager;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.text.InputType;
+          import android.webkit.URLUtil;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceError;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.EditText;
+          import android.widget.Toast;
+
+          /** AI Yordamchi: server veb-ilovasini ochadigan WebView qobig'i. Server manzili birinchi ishga tushishda so'raladi. */
+          public class MainActivity extends Activity {
+              private static final int REQ_FILE = 1;
+              private static final String BG = "#0f172a";
+
+              private WebView web;
+              private SharedPreferences prefs;
+              private ValueCallback<Uri[]> filePathCallback;
+              private boolean dialogShowing = false;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  getWindow().setStatusBarColor(Color.parseColor(BG));
+                  getWindow().setNavigationBarColor(Color.parseColor(BG));
+                  prefs = getSharedPreferences("app", MODE_PRIVATE);
+
+                  web = new WebView(this);
+                  web.setBackgroundColor(Color.parseColor(BG));
+                  setContentView(web);
+
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setAllowFileAccess(false);
+                  s.setAllowContentAccess(true);
+
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                          String base = baseUrl();
+                          String url = request.getUrl().toString();
+                          if (base != null && url.startsWith(base)) {
+                              return false;
+                          }
+                          try {
+                              startActivity(new Intent(Intent.ACTION_VIEW, request.getUrl()));
+                          } catch (Exception ignored) {
+                          }
+                          return true;
+                      }
+
+                      @Override
+                      public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                          if (request.isForMainFrame()) {
+                              askUrl("Sahifa ochilmadi. Server manzilini tekshiring:");
+                          }
+                      }
+                  });
+
+                  web.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                          if (filePathCallback != null) {
+                              filePathCallback.onReceiveValue(null);
+                          }
+                          filePathCallback = callback;
+                          try {
+                              startActivityForResult(params.createIntent(), REQ_FILE);
+                          } catch (Exception e) {
+                              filePathCallback = null;
+                              return false;
+                          }
+                          return true;
+                      }
+                  });
+
+                  web.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+                      try {
+                          String name = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                          DownloadManager.Request req = new DownloadManager.Request(Uri.parse(url));
+                          req.setMimeType(mimeType);
+                          req.setTitle(name);
+                          req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                          req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                          ((DownloadManager) getSystemService(DOWNLOAD_SERVICE)).enqueue(req);
+                          Toast.makeText(this, "Yuklanmoqda: " + name + " (Yuklamalar papkasiga)", Toast.LENGTH_LONG).show();
+                      } catch (Exception e) {
+                          Toast.makeText(this, "Faylni yuklab bo'lmadi", Toast.LENGTH_LONG).show();
+                      }
+                  });
+
+                  String url = baseUrl();
+                  if (url == null) {
+                      askUrl("Server manzilini kiriting (Northflank'dagi https://... havola):");
+                  } else {
+                      web.loadUrl(url);
+                  }
+              }
+
+              private String baseUrl() {
+                  String u = prefs.getString("url", null);
+                  return (u == null || u.isEmpty()) ? null : u;
+              }
+
+              private static String normalize(String input) {
+                  String u = input.trim();
+                  if (u.isEmpty()) {
+                      return u;
+                  }
+                  if (!u.startsWith("http://") && !u.startsWith("https://")) {
+                      u = "https://" + u;
+                  }
+                  while (u.endsWith("/")) {
+                      u = u.substring(0, u.length() - 1);
+                  }
+                  return u;
+              }
+
+              private void askUrl(String message) {
+                  if (dialogShowing || isFinishing()) {
+                      return;
+                  }
+                  dialogShowing = true;
+                  final EditText input = new EditText(this);
+                  input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+                  String current = baseUrl();
+                  input.setText(current != null ? current : "https://");
+                  new AlertDialog.Builder(this)
+                          .setTitle("Server manzili")
+                          .setMessage(message)
+                          .setView(input)
+                          .setCancelable(false)
+                          .setPositiveButton("Saqlash", (d, w) -> {
+                              dialogShowing = false;
+                              String u = normalize(input.getText().toString());
+                              if (u.isEmpty()) {
+                                  askUrl(message);
+                                  return;
+                              }
+                              prefs.edit().putString("url", u).apply();
+                              web.loadUrl(u);
+                          })
+                          .show();
+              }
+
+              @Override
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  if (requestCode == REQ_FILE && filePathCallback != null) {
+                      filePathCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+                      filePathCallback = null;
+                      return;
+                  }
+                  super.onActivityResult(requestCode, resultCode, data);
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (web != null && web.canGoBack()) {
+                      web.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+          }
+          EOF_FILE
+          pip install --quiet pillow
+          python3 - <<'EOF_PY'
+          import os
+          from PIL import Image, ImageDraw
+          S = 192
+          img = Image.new("RGB", (S, S), "#0f172a")
+          d = ImageDraw.Draw(img)
+          for r in range(86, 0, -1):
+              t = r / 86
+              d.ellipse((96 - r, 96 - r, 96 + r, 96 + r), fill=(int(56 + 120 * (1 - t)), int(189 - 70 * (1 - t)), int(248 - 20 * (1 - t))))
+          d.rounded_rectangle((52, 58, 140, 118), radius=16, fill="#0f172a")
+          d.polygon([(70, 116), (70, 142), (96, 116)], fill="#0f172a")
+          for x in (74, 96, 118):
+              d.ellipse((x - 6, 82, x + 6, 94), fill="#38bdf8")
+          os.makedirs("android/app/src/main/res/mipmap-xxxhdpi", exist_ok=True)
+          img.save("android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png")
+          EOF_PY
+          find android -type f | sort
+
+      - name: APK yig'ish
+        run: gradle -p android assembleDebug --no-daemon --stacktrace
+
+      - name: APK nomini o'zgartirish
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk AI-Yordamchi.apk
+
+      - name: Release yaratish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: AI Yordamchi APK ${{ github.run_number }}
+          files: AI-Yordamchi.apk
