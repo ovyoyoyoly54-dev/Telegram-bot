@@ -1,0 +1,485 @@
+# ================================================================ JSON → tuzilma
+# ... (o'zgarishsiz qoladi) ...
+
+
+# ================================================================ chizish yordamchilari
+def _rgb(h: str) -> RGBColor:
+    return RGBColor.from_string(h)
+
+
+def _alpha(shape, opacity_pct: float) -> None:
+    sf = shape._element.spPr.find(qn("a:solidFill"))
+    if sf is None or not len(sf):
+        return
+    clr = sf[0]
+    for old in clr.findall(qn("a:alpha")):
+        clr.remove(old)
+    a = etree.SubElement(clr, qn("a:alpha"))
+    a.set("val", str(int(opacity_pct * 1000)))
+
+
+def _shape(slide, kind, x, y, w, h, fill=None, line=None, line_w=1.0, radius=None, opacity=None):
+    shp = slide.shapes.add_shape(kind, Inches(x), Inches(y), Inches(w), Inches(h))
+    shp.shadow.inherit = False
+    if fill:
+        shp.fill.solid()
+        shp.fill.fore_color.rgb = _rgb(fill)
+        if opacity is not None:
+            _alpha(shp, opacity)
+    else:
+        shp.fill.background()
+    if line:
+        shp.line.color.rgb = _rgb(line)
+        shp.line.width = Pt(line_w)
+    else:
+        shp.line.fill.background()
+    if radius is not None and kind == MSO_SHAPE.ROUNDED_RECTANGLE:
+        shp.adjustments[0] = radius
+    return shp
+
+
+def rect(slide, x, y, w, h, fill, **kw):
+    return _shape(slide, MSO_SHAPE.RECTANGLE, x, y, w, h, fill, **kw)
+
+
+def rrect(slide, x, y, w, h, fill, radius=0.08, **kw):
+    return _shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h, fill, radius=radius, **kw)
+
+
+def oval(slide, x, y, w, h, fill, **kw):
+    return _shape(slide, MSO_SHAPE.OVAL, x, y, w, h, fill, **kw)
+
+
+def _lines(text: str, size: float, w: float, bold=False) -> int:
+    cpl = max(1, int(w * 72 / (size * (0.55 if bold else 0.5))))
+    return sum(max(1, math.ceil(len(p) / cpl)) for p in str(text).split("\n"))
+
+
+def fit(texts, w: float, h: float, max_s: int, min_s: int, bold=False, gap=0.08, lh=1.22) -> int:
+    texts = [t for t in texts if t]
+    if not texts:
+        return min_s
+    s = max_s
+    while s > min_s:
+        total = sum(_lines(t, s, w, bold) * s * lh / 72 for t in texts) + gap * max(len(texts) - 1, 0)
+        if total <= h:
+            break
+        s -= 1
+    return s
+
+
+def text(slide, x, y, w, h, paras, size, color, bold=False, italic=False, align=PP_ALIGN.LEFT,
+         anchor=MSO_ANCHOR.TOP, space_after=0):
+    """paras: str | list[str | list[(text, bold, size|None)]]."""
+    tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    tf = tb.text_frame
+    tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.NONE
+    tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    tf.vertical_anchor = anchor
+    if isinstance(paras, str):
+        paras = [paras]
+    for i, para in enumerate(paras):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = align
+        p.space_after = Pt(space_after)
+        runs = [(para, bold, None)] if isinstance(para, str) else para
+        for t, b, sz in runs:
+            r = p.add_run()
+            r.text = t
+            r.font.name = FONT
+            r.font.size = Pt(sz or size)
+            r.font.bold = b
+            r.font.italic = italic
+            r.font.color.rgb = _rgb(color)
+    return tb
+
+
+def _split_head(b: str) -> tuple[str, str]:
+    for sep in (": ", " — ", " – "):
+        if sep in b:
+            head, body = b.split(sep, 1)
+            if 2 <= len(head) <= 42 and body.strip():
+                return head.strip(), body.strip()
+    return "", b
+
+
+def _crop(img: bytes, w_in: float, h_in: float) -> bytes:
+    from PIL import Image
+
+    if w_in <= 0 or h_in <= 0:
+        raise ValueError("Rasm o'lchamlari noto'g'ri")
+    im = Image.open(io.BytesIO(img)).convert("RGB")
+    tw, th = im.size
+    if tw == 0 or th == 0:
+        raise ValueError("Rasm bo'sh")
+    target = w_in / h_in
+    if tw / th > target:
+        nw = int(th * target)
+        im = im.crop(((tw - nw) // 2, 0, (tw - nw) // 2 + nw, th))
+    else:
+        nh = int(tw / target)
+        im = im.crop((0, (th - nh) // 2, tw, (th - nh) // 2 + nh))
+    px = min(int(w_in * 140), 1800)
+    im = im.resize((px, max(1, int(px / target))))
+    out = io.BytesIO()
+    im.save(out, "JPEG", quality=86)
+    return out.getvalue()
+
+
+def _picture(slide, img: bytes, x, y, w, h) -> bool:
+    try:
+        slide.shapes.add_picture(io.BytesIO(_crop(img, w, h)), Inches(x), Inches(y), Inches(w), Inches(h))
+        return True
+    except Exception:  # noqa: BLE001 — buzilgan rasm butun taqdimotni to'xtatmasin
+        return False
+
+
+def _hero_bg(slide, th) -> None:
+    f = slide.background.fill
+    f.gradient()
+    f.gradient_angle = 35
+    f.gradient_stops[0].color.rgb = _rgb(th["hero1"])
+    f.gradient_stops[1].color.rgb = _rgb(th["hero2"])
+
+
+def _solid_bg(slide, color: str) -> None:
+    f = slide.background.fill
+    f.solid()
+    f.fore_color.rgb = _rgb(color)
+
+
+def _header(slide, th, title: str) -> None:
+    rect(slide, MX, 0.62, 0.9, 0.07, th["accent"])
+    size = fit([title], CW, 1.0, 36, 22, bold=True, lh=1.12)
+    text(slide, MX, 0.82, CW, 1.05, title, size, th["text"], bold=True)
+
+
+def _footer(slide, th, deck_title: str, num: int) -> None:
+    text(slide, MX, 7.02, 8, 0.25, deck_title, 10, th["muted"])
+    text(slide, W - MX - 1.2, 7.02, 1.2, 0.25, str(num), 10, th["muted"], align=PP_ALIGN.RIGHT)
+
+
+def _dots(slide, th, items, x, y, w, h, max_s=22) -> None:
+    n = len(items)
+    if n == 0:
+        return
+    row = h / n
+    size = min(fit([b], w - 0.5, row - 0.1, max_s, 13) for b in items)
+    for i, b in enumerate(items):
+        top = y + i * row
+        head, body = _split_head(b)
+        oval(slide, x, top + size / 72 * 0.45, 0.17, 0.17, th["accent"])
+        paras = [[(head + ": ", True, None), (body, False, None)]] if head else [b]
+        text(slide, x + 0.4, top, w - 0.4, row - 0.08, paras, size, th["text"])
+
+
+# ================================================================ slayd turlari
+def _slide_title(slide, th, s, img, deck_title, num, closing=False):
+    _hero_bg(slide, th)
+    big = oval(slide, W - 5.2, -2.3, 7.6, 7.6, th["accent"], opacity=16)
+    oval(slide, -2.2, H - 3.2, 5.4, 5.4, th["accent2"], opacity=14)
+    del big
+    has_img = bool(img) and not closing
+    if has_img:
+        shown = _picture(slide, img, 8.25, 0, W - 8.25, H)
+        has_img = shown
+    tw = 6.9 if has_img else (9.6 if not closing else 10.6)
+    x = MX + 0.1 if not closing else (W - tw) / 2
+    al = PP_ALIGN.LEFT if not closing else PP_ALIGN.CENTER
+    title, sub = s.get("title", ""), s.get("subtitle", "")
+    size = fit([title], tw, 2.6, 56, 30, bold=True, lh=1.1)
+    lines = _lines(title, size, tw, True)
+    th_h = lines * size * 1.14 / 72
+    top = max(1.4, (H - th_h - (1.3 if sub else 0)) / 2 - 0.2)
+    bar_x = x if not closing else (W - 1.1) / 2
+    rect(slide, bar_x, top - 0.35, 1.1, 0.09, th["accent2"] if th["dark"] else "FFFFFF")
+    text(slide, x, top, tw, th_h + 0.1, title, size, th["hero_text"], bold=True, align=al)
+    if sub:
+        ssz = fit([sub], tw, 1.3, 24, 14)
+        text(slide, x, top + th_h + 0.3, tw, 1.3, sub, ssz, th["hero_sub"], align=al)
+
+
+def _slide_section(slide, th, s, num, idx):
+    _hero_bg(slide, th)
+    oval(slide, W - 4.4, H - 4.6, 7, 7, th["accent2"], opacity=15)
+    text(slide, MX + 0.1, 1.5, 6, 2.2, f"{idx:02d}", 120, th["hero_sub"], bold=True)
+    title, sub = s.get("title", ""), s.get("subtitle", "")
+    size = fit([title], 10.5, 1.8, 48, 28, bold=True, lh=1.1)
+    rect(slide, MX + 0.1, 4.0, 1.1, 0.09, th["accent2"] if th["dark"] else "FFFFFF")
+    text(slide, MX + 0.1, 4.3, 10.5, 1.8, title, size, th["hero_text"], bold=True)
+    if sub:
+        text(slide, MX + 0.1, 6.1, 10.5, 0.8, sub, 20, th["hero_sub"])
+
+
+def _slide_bullets(slide, th, s):
+    items = s.get("bullets", [])
+    if not items:
+        return
+    n = len(items)
+    cols = 1 if n <= 3 else 2
+    rows = math.ceil(n / cols)
+    gap = 0.28
+    area_y, area_h = 2.05, 4.75
+    cw = (CW - (cols - 1) * gap) / cols
+    ch = min((area_h - (rows - 1) * gap) / rows, 2.1)
+    top = area_y + (area_h - (rows * ch + (rows - 1) * gap)) / 2
+    for i, b in enumerate(items):
+        r, c = divmod(i, cols)
+        x, y = MX + c * (cw + gap), top + r * (ch + gap)
+        rrect(slide, x, y, cw, ch, th["card"], line=th["line"])
+        d = 0.58
+        oval(slide, x + 0.28, y + (ch - d) / 2, d, d, th["accent"])
+        text(slide, x + 0.28, y + (ch - d) / 2, d, d, str(i + 1), 20, th["on_accent"], bold=True,
+             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        tx, tw = x + 1.15, cw - 1.45
+        head, body = _split_head(b)
+        if head:
+            size = fit([head, body], tw, ch - 0.3, 22, 12)
+            paras = [[(head, True, size + 1)], [(body, False, size - 1)]]
+        else:
+            size = fit([b], tw, ch - 0.3, 24, 13)
+            paras = [b]
+        text(slide, tx, y + 0.15, tw, ch - 0.3, paras, size, th["text"], anchor=MSO_ANCHOR.MIDDLE,
+             space_after=2)
+
+
+def _slide_image_text(slide, th, s, img):
+    px = 7.95
+    bullets = s.get("bullets", [])
+    if img and bullets and _picture(slide, img, px, 0, W - px, H):
+        rect(slide, px - 0.07, 0, 0.07, H, th["accent"])
+        rect(slide, MX, 0.62, 0.9, 0.07, th["accent"])
+        title = s.get("title", "Slayd")
+        size = fit([title], px - MX - 0.6, 1.5, 34, 22, bold=True, lh=1.12)
+        text(slide, MX, 0.82, px - MX - 0.6, 1.5, title, size, th["text"], bold=True)
+        _dots(slide, th, bullets, MX, 2.5, px - MX - 0.7, 4.2, 22)
+    else:
+        _header(slide, th, s.get("title", "Slayd"))
+        _slide_bullets(slide, th, s)
+
+
+def _slide_two_column(slide, th, s):
+    left = s.get("left", [])
+    right = s.get("right", [])
+    if not left and not right:
+        return
+    gap = 0.4
+    cw = (CW - gap) / 2
+    for i, (ttl, items) in enumerate(((s.get("left_title", ""), left), (s.get("right_title", ""), right))):
+        x = MX + i * (cw + gap)
+        rrect(slide, x, 2.0, cw, 4.75, th["card"], line=th["line"], radius=0.05)
+        y = 2.3
+        if ttl:
+            text(slide, x + 0.4, y, cw - 0.8, 0.6, ttl, 24, th["accent"], bold=True)
+            rect(slide, x + 0.4, y + 0.62, 0.7, 0.06, th["accent"])
+            y += 0.95
+        if items:
+            _dots(slide, th, items, x + 0.4, y, cw - 0.8, max(0.5, 6.55 - y), 20)
+
+
+def _slide_stats(slide, th, s):
+    stats = s.get("stats", [])
+    if not stats:
+        return
+    n = len(stats)
+    gap = 0.35
+    cw = (CW - (n - 1) * gap) / n
+    for i, st in enumerate(stats):
+        x = MX + i * (cw + gap)
+        rrect(slide, x, 2.25, cw, 3.55, th["card"], line=th["line"], radius=0.06)
+        rect(slide, x + (cw - 0.8) / 2, 2.25, 0.8, 0.09, th["accent"])
+        vs = fit([st["value"]], cw - 0.5, 1.4, 66, 28, bold=True, lh=1.0)
+        text(slide, x + 0.25, 2.6, cw - 0.5, 1.45, st["value"], vs, th["accent"], bold=True,
+             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        ls = fit([st["label"]], cw - 0.6, 1.5, 24, 14)
+        text(slide, x + 0.3, 4.15, cw - 0.6, 1.5, st["label"], ls, th["text"], align=PP_ALIGN.CENTER)
+    if s.get("subtitle"):
+        text(slide, MX, 6.2, CW, 0.5, s["subtitle"], 16, th["muted"], align=PP_ALIGN.CENTER)
+
+
+def _slide_steps(slide, th, s):
+    steps = s.get("steps", [])
+    if not steps:
+        return
+    n = len(steps)
+    cw = CW / n
+    rect(slide, MX + cw / 2, 2.87, CW - cw, 0.05, th["line"])
+    for i, st in enumerate(steps):
+        cx = MX + (i + 0.5) * cw
+        oval(slide, cx - 0.4, 2.5, 0.8, 0.8, th["accent"])
+        text(slide, cx - 0.4, 2.5, 0.8, 0.8, str(i + 1), 26, th["on_accent"], bold=True,
+             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        ts = fit([st["title"]], cw - 0.3, 1.0, 22, 14, bold=True)
+        text(slide, cx - cw / 2 + 0.15, 3.6, cw - 0.3, 1.0, st["title"], ts, th["text"], bold=True,
+             align=PP_ALIGN.CENTER)
+        if st.get("text"):
+            bs = fit([st["text"]], cw - 0.4, 2.2, 18, 12)
+            text(slide, cx - cw / 2 + 0.2, 4.55, cw - 0.4, 2.2, st["text"], bs, th["muted"],
+                 align=PP_ALIGN.CENTER)
+
+
+def _slide_quote(slide, th, s):
+    if not s.get("quote"):
+        return
+    text(slide, MX, 0.6, 3, 2.4, "“", 160, th["accent"], bold=True)
+    q = s["quote"]
+    size = fit([q], 10.4, 3.2, 40, 20, lh=1.25)
+    text(slide, 1.7, 2.1, 10.4, 3.4, q, size, th["text"], italic=True, anchor=MSO_ANCHOR.MIDDLE)
+    if s.get("author"):
+        rect(slide, 1.7, 5.85, 0.7, 0.06, th["accent"])
+        text(slide, 1.7, 6.0, 10, 0.5, s["author"], 20, th["muted"], bold=True)
+
+
+def _slide_table(slide, th, s):
+    headers = s.get("headers", [])
+    rows = s.get("rows", [])
+    if not headers or not rows:
+        return
+    nr, nc = len(rows) + 1, len(headers)
+    x, y, w = MX, 2.1, CW
+    h = min(0.92 * nr, 4.7)
+    gf = slide.shapes.add_table(nr, nc, Inches(x), Inches(y), Inches(w), Inches(h))
+    tbl = gf.table
+    weights = [max(6, max(len(str(r[c])) for r in [headers] + rows)) for c in range(nc)]
+    tot = sum(weights) or 1
+    size = 22 if nr <= 5 and nc <= 3 else (18 if nr <= 6 else 15)
+    for c in range(nc):
+        tbl.columns[c].width = Inches(w * weights[c] / tot)
+    for r in range(nr):
+        tbl.rows[r].height = Inches(h / nr)
+        for c in range(nc):
+            cell = tbl.cell(r, c)
+            val = headers[c] if r == 0 else rows[r - 1][c]
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = _rgb(th["accent"] if r == 0 else (th["card"] if r % 2 else th["bg2"]))
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+            cell.margin_left = cell.margin_right = Inches(0.15)
+            tf = cell.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.text = ""
+            run = p.add_run()
+            run.text = val
+            run.font.name = FONT
+            run.font.size = Pt(size)
+            run.font.bold = r == 0
+            run.font.color.rgb = _rgb(th["on_accent"] if r == 0 else th["text"])
+
+
+def _slide_chart(slide, th, s):
+    ch = s.get("chart")
+    if not ch or not ch.get("categories") or not ch.get("series"):
+        return
+    kind = {"bar": XL_CHART_TYPE.COLUMN_CLUSTERED, "barh": XL_CHART_TYPE.BAR_CLUSTERED,
+            "line": XL_CHART_TYPE.LINE_MARKERS, "pie": XL_CHART_TYPE.PIE}[ch["type"]]
+    data = CategoryChartData()
+    data.categories = ch["categories"]
+    series = ch["series"][:1] if ch["type"] == "pie" else ch["series"]
+    for se in series:
+        data.add_series(se["name"], se["values"])
+    side = bool(s.get("bullets"))
+    cw = 7.7 if side else CW
+    gf = slide.shapes.add_chart(kind, Inches(MX), Inches(2.0), Inches(cw), Inches(4.85), data)
+    c = gf.chart
+    c.has_title = False
+    c.font.size = Pt(14)
+    c.font.name = FONT
+    c.font.color.rgb = _rgb(th["text"])
+    palette = [th["accent"], th["accent2"]] + CHART_EXTRA
+    plot = c.plots[0]
+    if ch["type"] == "pie":
+        c.has_legend = True
+        c.legend.position = XL_LEGEND_POSITION.RIGHT
+        c.legend.include_in_layout = False
+        c.legend.font.size = Pt(14)
+        c.legend.font.color.rgb = _rgb(th["text"])
+        plot.has_data_labels = True
+        plot.data_labels.font.size = Pt(13)
+        plot.data_labels.font.bold = True
+        plot.data_labels.font.color.rgb = _rgb("FFFFFF")
+        plot.data_labels.number_format = "0.#"
+        plot.data_labels.number_format_is_linked = False
+        for i, pt in enumerate(plot.series[0].points):
+            pt.format.fill.solid()
+            pt.format.fill.fore_color.rgb = _rgb(palette[i % len(palette)])
+    else:
+        multi = len(series) > 1
+        c.has_legend = multi
+        if multi:
+            c.legend.position = XL_LEGEND_POSITION.BOTTOM
+            c.legend.include_in_layout = False
+            c.legend.font.size = Pt(13)
+            c.legend.font.color.rgb = _rgb(th["text"])
+        for i, se in enumerate(plot.series):
+            col = _rgb(palette[i % len(palette)])
+            if ch["type"] == "line":
+                se.format.line.color.rgb = col
+                se.format.line.width = Pt(3)
+                se.smooth = False
+                se.marker.format.fill.solid()
+                se.marker.format.fill.fore_color.rgb = col
+                se.marker.format.line.color.rgb = col
+            else:
+                se.format.fill.solid()
+                se.format.fill.fore_color.rgb = col
+        if ch["type"] != "line":
+            plot.gap_width = 70
+        va, ca = c.value_axis, c.category_axis
+        va.major_gridlines.format.line.color.rgb = _rgb(th["line"])
+        va.format.line.fill.background()
+        ca.format.line.color.rgb = _rgb(th["line"])
+        va.tick_labels.font.size = ca.tick_labels.font.size = Pt(13)
+        va.tick_labels.font.color.rgb = ca.tick_labels.font.color.rgb = _rgb(th["muted"])
+    if side:
+        x = MX + cw + 0.35
+        w = W - MX - x
+        rrect(slide, x, 2.0, w, 4.85, th["card"], line=th["line"], radius=0.05)
+        rect(slide, x + 0.35, 2.35, 0.7, 0.07, th["accent"])
+        _dots(slide, th, s["bullets"], x + 0.35, 2.65, w - 0.6, 3.95, 18)
+
+
+# ================================================================ asosiy qurilish
+def build_pptx(deck: dict, images: dict | None = None) -> bytes:
+    images = images or {}
+    th = THEMES.get(deck.get("theme"), THEMES[DEFAULT_THEME])
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(W), Inches(H)
+    blank = prs.slide_layouts[6]
+    sec_idx = 0
+    for num, s in enumerate(deck.get("slides", []), 1):
+        slide = prs.slides.add_slide(blank)
+        lay = s.get("layout", "bullets")
+        img = images.get(s.get("image_prompt", ""))
+        try:
+            if lay in ("title", "closing"):
+                _slide_title(slide, th, s, img, deck.get("title", "Taqdimot"), num, closing=(lay == "closing"))
+            elif lay == "section":
+                sec_idx += 1
+                _slide_section(slide, th, s, num, sec_idx)
+            else:
+                _solid_bg(slide, th["bg"])
+                if lay == "quote":
+                    _slide_quote(slide, th, s)
+                elif lay == "image_text":
+                    _slide_image_text(slide, th, s, img)
+                else:
+                    _header(slide, th, s.get("title", "Slayd"))
+                    {"bullets": _slide_bullets, "two_column": _slide_two_column, "stats": _slide_stats,
+                     "steps": _slide_steps, "table": _slide_table, "chart": _slide_chart}[lay](slide, th, s)
+                if not (lay == "image_text" and img):
+                    _footer(slide, th, deck.get("title", "Taqdimot"), num)
+        except Exception as exc:  # noqa: BLE001
+            # Bitta slayd xato bersa, butun taqdimot to'xtamasin
+            import logging
+            logging.getLogger(__name__).warning("Slayd %s xatosi: %s", num, exc, exc_info=True)
+        if s.get("notes"):
+            try:
+                slide.notes_slide.notes_text_frame.text = s["notes"]
+            except Exception:  # noqa: BLE001
+                pass
+    prs.core_properties.title = deck.get("title", "Taqdimot")
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
