@@ -1,4 +1,3 @@
-
 """Telegram bot sozlamalari."""
 import os
 from dotenv import load_dotenv
@@ -60,7 +59,8 @@ GEMINI_MODEL = _get("GEMINI_MODEL", "gemini-2.5-flash")
 
 OPENROUTER_API_KEY = _get("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = _get("OPENROUTER_MODEL", "openrouter/free")
-OPENROUTER_VISION_MODEL = _get("OPENROUTER_VISION_MODEL")
+# TUZATILDI: bo'sh bo'lsa, OPENROUTER_MODEL ga fallback
+OPENROUTER_VISION_MODEL = _get("OPENROUTER_VISION_MODEL") or OPENROUTER_MODEL
 
 PROVIDERS = ("groq", "openrouter", "gemini")
 
@@ -79,6 +79,13 @@ for name, value in (
             f"❌ {name} noto'g'ri. "
             "Qiymat: groq, openrouter yoki gemini."
         )
+    # TUZATILDI: tanlangan provayder uchun API kalit mavjudligini tekshirish
+    if value == "groq" and not GROQ_API_KEY:
+        raise SystemExit(f"❌ {name}=groq, lekin GROQ_API_KEY topilmadi.")
+    if value == "openrouter" and not OPENROUTER_API_KEY:
+        raise SystemExit(f"❌ {name}=openrouter, lekin OPENROUTER_API_KEY topilmadi.")
+    if value == "gemini" and not GEMINI_API_KEY:
+        raise SystemExit(f"❌ {name}=gemini, lekin GEMINI_API_KEY topilmadi.")
 
 # Cloudflare rasm yaratish va tahrirlash
 CF_ACCOUNT_ID = _get("CF_ACCOUNT_ID")
@@ -99,7 +106,8 @@ CHAT_MODEL = _get("CHAT_MODEL", "openai/gpt-oss-120b")
 VISION_MODEL = _get("VISION_MODEL", "qwen/qwen3.8-27b")
 CLASSIFIER_MODEL = _get("CLASSIFIER_MODEL", "openai/gpt-oss-20b")
 STT_MODEL = _get("STT_MODEL", "whisper-large-v3-turbo")
-STT_LANGUAGE = _get("STT_LANGUAGE")
+# TUZATILDI: bo'sh bo'lsa None qaytarish (llm.py uchun)
+STT_LANGUAGE = _get("STT_LANGUAGE") or None
 REASONING_EFFORT = _get("REASONING_EFFORT", "low")
 
 CHAT_MAX_TOKENS = max(128, _int("CHAT_MAX_TOKENS", 2048))
@@ -125,9 +133,9 @@ FILE_CACHE = max(1, _int("FILE_CACHE", 500))
 DECK_CACHE = max(1, _int("DECK_CACHE", 100))
 
 # Texnik sozlamalar
-WORKERS = max(1, _int("WORKERS", 8))
-REQUEST_TIMEOUT = max(5, _int("REQUEST_TIMEOUT", 60))
-IMAGE_TIMEOUT = max(5, _int("IMAGE_TIMEOUT", 120))
+WORKERS = max(1, min(_int("WORKERS", 8), 32))  # TUZATILDI: yuqori chegara
+REQUEST_TIMEOUT = max(5, min(_int("REQUEST_TIMEOUT", 60), 300))  # TUZATILDI
+IMAGE_TIMEOUT = max(5, min(_int("IMAGE_TIMEOUT", 120), 600))  # TUZATILDI
 
 TELEGRAM_MAX_CHARS = 3500
 HEALTH_PORT = max(
