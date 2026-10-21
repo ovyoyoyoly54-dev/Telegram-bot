@@ -48,6 +48,39 @@ CLASSIFIER_PROMPT = (
     "prompt: faqat draw/edit uchun — rasm modeli uchun qisqa INGLIZCHA ko'rsatma. "
     "chat va file bo'lsa bo'sh qoldir."
 )
+# ================================================================ WEB SEARCH
+
+def web_search(query: str, max_results: int = 5) -> str:
+    """DuckDuckGo orqali internetdan qidiradi."""
+    try:
+        results = DDGS().text(query, max_results=max_results)
+        if not results:
+            return ""
+        
+        formatted = "INTERNET QIDIRUV NATIJALARI:\n"
+        for i, r in enumerate(results, 1):
+            formatted += f"{i}. {r.get('title', '')}\n"
+            formatted += f"   {r.get('body', '')}\n"
+            formatted += f"   Manba: {r.get('href', '')}\n\n"
+        return formatted
+    except Exception as exc:
+        log.warning("Qidiruv xatosi: %s", exc)
+        return ""
+
+def chat_with_search(history, user_text, system, max_tokens=None, task="chat", temperature=None):
+    """Real-vaqt savollari uchun: avval qidiradi, keyin javob beradi."""
+    log.info("Internetdan qidirilmoqda: %s", user_text)
+    search_data = web_search(user_text)
+    
+    if search_data:
+        # Qidiruv natijalarini system promptga qo'shamiz
+        system = system + "\n\n" + search_data + "\n\n" + (
+            "MUHIM QOIDA: Yuqoridagi internet qidiruv natijalaridan foydalanib, foydalanuvchiga ANIQ va TO'G'RI javob ber. "
+            "Agar natijalarda ma'lumot bo'lmasa, o'zing bilganingni yozma, shunchaki 'internetdan aniq ma'lumot topa olmadim' deb javob ber."
+        )
+    
+    # Qidiruv bilan yoki qidiruvsiz chat_multi ga yuboramiz
+    return chat_multi(history, user_text, system, max_tokens=max_tokens, task=task, temperature=temperature)
 
 REFINER_PROMPT = (
     "Foydalanuvchining rasm tavsifini rasm yaratish modeli uchun qisqa, aniq INGLIZCHA promptga "
