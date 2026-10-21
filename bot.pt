@@ -224,10 +224,12 @@ def do_chat(m, text: str, image: bytes | None = None, label: str | None = None) 
     if doc:
         system += docs.context_block(doc)
 
-    # MUHIM: chat_multi — barcha provayderlardan parallel javob olib, birlashtiradi.
-    # Agar faqat bitta API bo'lsa, avtomatik oddiy javobga tushadi.
     try:
-        answer = llm.chat_multi(state.get_history(uid), text, system, image)
+        # MUHIM: Agar savol real-vaqtga oid bo'lsa va rasm bo'lmasa — internetdan qidiramiz
+        if not image and _REALTIME_HINT.search(_norm(text)):
+            answer = llm.chat_with_search(state.get_history(uid), text, system)
+        else:
+            answer = llm.chat_multi(state.get_history(uid), text, system, image)
     except llm.LLMError as exc:
         log.warning("chat_multi ishlamadi, oddiy chat: %s", exc)
         answer = llm.chat(state.get_history(uid), text, system, image)
