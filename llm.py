@@ -55,6 +55,7 @@ def web_search(query: str, max_results: int = 5) -> str:
     try:
         results = DDGS().text(query, max_results=max_results)
         if not results:
+            log.warning("Qidiruv natija bermadi: %s", query)
             return ""
         
         formatted = "INTERNET QIDIRUV NATIJALARI:\n"
@@ -62,6 +63,7 @@ def web_search(query: str, max_results: int = 5) -> str:
             formatted += f"{i}. {r.get('title', '')}\n"
             formatted += f"   {r.get('body', '')}\n"
             formatted += f"   Manba: {r.get('href', '')}\n\n"
+        log.info("Qidiruv muvaffaqiyatli: %s ta natija topildi", len(results))
         return formatted
     except Exception as exc:
         log.warning("Qidiruv xatosi: %s", exc)
@@ -72,15 +74,27 @@ def chat_with_search(history, user_text, system, max_tokens=None, task="chat", t
     log.info("Internetdan qidirilmoqda: %s", user_text)
     search_data = web_search(user_text)
     
+    # System promptni majburan o'zgartiramiz
+    search_system = system + "\n\n"
     if search_data:
-        # Qidiruv natijalarini system promptga qo'shamiz
-        system = system + "\n\n" + search_data + "\n\n" + (
+        search_system += search_data + "\n\n"
+        search_system += (
             "MUHIM QOIDA: Yuqoridagi internet qidiruv natijalaridan foydalanib, foydalanuvchiga ANIQ va TO'G'RI javob ber. "
-            "Agar natijalarda ma'lumot bo'lmasa, o'zing bilganingni yozma, shunchaki 'internetdan aniq ma'lumot topa olmadim' deb javob ber."
+            "Sen hozir internetga ulangansan. 'Men internetga ulanmaganman' yoki 'real-vaqtni bilmayman' deb javob berish QAT'IYAN TAQIQLANADI. "
+            "Faqat berilgan qidiruv natijalariga tayanib javob yoz."
+        )
+    else:
+        search_system += (
+            "MUHIM QOIDA: Internetdan qidiruv natija bermadi. Foydalanuvchiga 'internetdan aniq ma'lumot topa olmadim' deb aytishing mumkin, "
+            "lekin 'men internetsizman' dema. O'zing bilgan eng so'nggi ma'lumotni ayt."
         )
     
-    # Qidiruv bilan yoki qidiruvsiz chat_multi ga yuboramiz
-    return chat_multi(history, user_text, system, max_tokens=max_tokens, task=task, temperature=temperature)
+    # Javobni olish (agar chat_multi ishlamasa, oddiy chatga qaytadi)
+    try:
+        return chat_multi(history, user_text, search_system, max_tokens=max_tokens, task=task, temperature=temperature)
+    except Exception as exc:
+        log.warning("chat_with_search ichida xato, oddiy chatga o'tiladi: %s", exc)
+        return chat(history, user_text, search_system, max_tokens=max_tokens, task=task, temperature=temperature)
 
 REFINER_PROMPT = (
     "Foydalanuvchining rasm tavsifini rasm yaratish modeli uchun qisqa, aniq INGLIZCHA promptga "
