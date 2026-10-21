@@ -29,6 +29,9 @@ def _balance_fences(chunks: list[str]) -> list[str]:
 
 def split_text(text: str, limit: int) -> list[str]:
     """Matnni qator chegarasidan bo'lib, limitdan oshmaydigan bo'laklarga ajratadi."""
+    # TUZATILDI: limit juda kichik bo'lsa, xato bermaslik uchun
+    if limit < 1:
+        limit = 1
     chunks, cur = [], ""
     for line in text.split("\n"):
         while len(line) > limit:
@@ -61,7 +64,11 @@ def _inline_line(line: str) -> str:
     out = []
     for i, piece in enumerate(_INLINE_CODE.split(line)):
         if i % 2 == 1:
-            out.append("<code>" + html.escape(piece[1:-1], quote=False) + "</code>")
+            # TUZATILDI: yopilmagan ` bo'lsa, xato bermaslik uchun
+            if piece.startswith("`") and piece.endswith("`") and len(piece) > 2:
+                out.append("<code>" + html.escape(piece[1:-1], quote=False) + "</code>")
+            else:
+                out.append(_inline(piece))
         else:
             out.append(_inline(piece))
     return "".join(out)
@@ -88,6 +95,7 @@ def _text_block(block: str) -> str:
 def to_telegram_html(text: str) -> str:
     out = []
     for part in _FENCE.split(text):
+        # TUZATILDI: kod bloki yopilmagan bo'lsa ham ishlash uchun
         if len(part) >= 6 and part.startswith("```") and part.endswith("```"):
             body = part[3:-3]
             lang = ""
