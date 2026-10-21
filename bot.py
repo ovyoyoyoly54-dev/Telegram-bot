@@ -213,10 +213,9 @@ def _safe_reply(m, text: str) -> None:
         log.exception("Xato xabarini yuborib bo'lmadi")
 
 
-# ---------------------------------------------------------------- asosiy mantiq
-
+# ---------------------------------------------------------------- asosiy 
 def do_chat(m, text: str, image: bytes | None = None, label: str | None = None) -> None:
-    """Oddiy suhbat — parallel + merge (chat_multi)."""
+    """Oddiy suhbat — real-vaqt savollari uchun qidiruv bilan."""
     uid = m.from_user.id
     bot.send_chat_action(m.chat.id, "typing")
     system = MODES[state.get_mode(uid)][1]
@@ -224,15 +223,16 @@ def do_chat(m, text: str, image: bytes | None = None, label: str | None = None) 
     if doc:
         system += docs.context_block(doc)
 
-    try:
-        # MUHIM: Agar savol real-vaqtga oid bo'lsa va rasm bo'lmasa — internetdan qidiramiz
-        if not image and _REALTIME_HINT.search(_norm(text)):
-            answer = llm.chat_with_search(state.get_history(uid), text, system)
-        else:
+    # Agar rasm bo'lmasa va real-vaqtga oid so'zlar qatnashsa — qidiruvga yuboramiz
+    if not image and _REALTIME_HINT.search(_norm(text)):
+        log.info("Real-vaqt savoli aniqlandi. Qidiruvga o'tiladi: %s", text)
+        answer = llm.chat_with_search(state.get_history(uid), text, system)
+    else:
+        try:
             answer = llm.chat_multi(state.get_history(uid), text, system, image)
-    except llm.LLMError as exc:
-        log.warning("chat_multi ishlamadi, oddiy chat: %s", exc)
-        answer = llm.chat(state.get_history(uid), text, system, image)
+        except Exception as exc:
+            log.error("chat_multi xatosi, oddiy chatga o'tiladi: %s", exc)
+            answer = llm.chat(state.get_history(uid), text, system, image)
 
     state.remember(uid, label or text, answer)
     send_long(m, answer)
