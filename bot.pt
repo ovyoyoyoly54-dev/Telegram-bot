@@ -81,6 +81,13 @@ _FILE_HINT = re.compile(
     r"|\brezyume|\bresume|\bhisobot|\bprezentatsiya|\bpresentation|\btaqdimot|\bslayd|\bslide|\bpptx"
     r"|\bpowerpoint|\bфайл|\bтаqдимот|\bпрезентация)",
     re.I,
+# Real-vaqt (internet talab qiladigan) savollarni aniqlash
+_REALTIME_HINT = re.compile(
+    r"(bugun|hozir|kecha|ertaga|joriy yil|shu yil|real-vaqt|yangi|oxirgi|eng so'nggi|kurs|ob-havo|narx"
+    r"|natija|hisob|oyin|o'yin|match|kim oynaydi|kim bilan|qachon|soat necha|yangilik|voqea|prezident|valyuta"
+    r"|сегодня|сейчас|курс|погода|новости)",
+    re.I,
+
 )
 _DOCEDIT_HINT = re.compile(
     r"(tahrir|tuzat|qayta yoz|zgartir|tarjima|\bqo'?sh|o'chir|qisqartir|kengaytir|formatla|to'g'rila|to'ldir"
