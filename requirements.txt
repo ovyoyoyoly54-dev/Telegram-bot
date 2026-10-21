@@ -1,6 +1,7 @@
 pyTelegramBotAPI>=4.14,<5
 requests>=2.31,<3
 python-dotenv>=1.0,<2
+ddgs>=9.0.0
 Pillow>=10.0,<12
 pypdf>=4.0,<5
 python-docx>=1.1,<2
