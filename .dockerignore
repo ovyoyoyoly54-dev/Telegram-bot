@@ -1,0 +1,25 @@
+
+# Maxfiy ma'lumotlar
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# Git va Python keshlari
+.git/
+.gitignore
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Loglar
+*.log
+.DS_Store
+Thumbs.db
