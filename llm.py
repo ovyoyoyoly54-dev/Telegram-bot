@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import time
+from ddgs import DDGS
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
