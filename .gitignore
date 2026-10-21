@@ -1,0 +1,25 @@
+
+# Maxfiy ma'lumotlar
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Vaqtinchalik fayllar
+*.log
+.DS_Store
+Thumbs.db
