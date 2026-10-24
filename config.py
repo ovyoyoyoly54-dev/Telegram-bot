@@ -70,10 +70,32 @@ GROQ_API_KEY = _required("GROQ_API_KEY")
 GEMINI_API_KEY = _get("GEMINI_API_KEY")
 GEMINI_MODEL = _get("GEMINI_MODEL", "gemini-2.5-flash")
 
-# OpenRouter (zaxira)
-OPENROUTER_API_KEY = _get("OPENROUTER_API_KEY")
+
+# OpenRouter — ikkita API kaliti
+OPENROUTER_API_KEY_1 = _get("OPENROUTER_API_KEY_1")
+OPENROUTER_API_KEY_2 = _get("OPENROUTER_API_KEY_2")
+
+# Eski nom bilan saqlangan kalit bo'lsa, uni ham qo'llab-quvvatlash
+OPENROUTER_API_KEY = (
+    OPENROUTER_API_KEY_1
+    or _get("OPENROUTER_API_KEY")
+    or OPENROUTER_API_KEY_2
+)
+
+OPENROUTER_API_KEYS = list(dict.fromkeys(
+    key for key in (
+        OPENROUTER_API_KEY_1,
+        OPENROUTER_API_KEY_2,
+        _get("OPENROUTER_API_KEY"),
+    )
+    if key
+))
+
 OPENROUTER_MODEL = _get("OPENROUTER_MODEL", "openrouter/free")
-OPENROUTER_VISION_MODEL = _get("OPENROUTER_VISION_MODEL") or OPENROUTER_MODEL
+OPENROUTER_VISION_MODEL = (
+    _get("OPENROUTER_VISION_MODEL") or OPENROUTER_MODEL
+)
+
 
 PROVIDERS = ("groq", "openrouter", "gemini")
 
