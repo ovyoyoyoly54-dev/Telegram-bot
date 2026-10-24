@@ -576,9 +576,7 @@ JAVOB QOIDALARI:
         max_tokens=max_tokens,
         task=task,
         temperature=temperature,
-    )
-
-INTERNETDAN FOYDALANISH ==================================
+    
 # CHAT: ZAXIRA PROVAYDERLAR
 # ================================================================
 
