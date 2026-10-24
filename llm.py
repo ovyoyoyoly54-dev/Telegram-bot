@@ -466,8 +466,9 @@ def _presentation_settings(user_text, system, max_tokens, temperature):
 # INTERNET QIDIRUVI
 # ================================================================
 
-def web_search(query, max_results=5):
-    """DuckDuckGo orqali qidiradi; natijalarni manba havolalari bilan qaytaradi."""
+
+def web_search(query, max_results=6):
+    """Internetdan qidiruv natijalarini manba havolalari bilan oladi."""
     query = (query or "").strip()
     if not query:
         return ""
@@ -477,29 +478,25 @@ def web_search(query, max_results=5):
             results = list(ddgs.text(query, max_results=max_results))
 
         if not results:
-            log.warning("Internet qidiruvi natija bermadi: %s", query)
             return ""
 
         lines = [
-            "INTERNET QIDIRUV NATIJALARI.",
-            "Quyidagi natijalar tashqi manbalardan olingan.",
-            "Natijalar eski, to'liq bo'lmagan yoki qarama-qarshi bo'lishi mumkin.",
+            "INTERNET QIDIRUV NATIJALARI:",
+            "Har bir natijaning sanasi va manbasini tekshir.",
+            "Natijalardagi ma'lumot eskirgan bo'lishi mumkin.",
             "",
         ]
 
-        for i, result in enumerate(results, 1):
-            title = result.get("title", "")
-            body = result.get("body", "")
-            href = result.get("href", "")
-            lines.append(f"{i}. {title}")
-            lines.append(f"   {body}")
-            lines.append(f"   Manba: {href}")
-            lines.append("")
+        for i, item in enumerate(results, 1):
+            title = item.get("title", "")
+            body = item.get("body", "")
+            href = item.get("href", "")
+            lines.append(f"{i}. {title}\n{body}\nManba: {href}\n")
 
         return "\n".join(lines)
 
-    except Exception as exc:
-        log.warning("Internet qidiruvi xatosi: %s", exc)
+    except Exception:
+        log.exception("Internet qidiruvi bajarilmadi")
         return ""
 
 
@@ -511,22 +508,75 @@ def chat_with_search(
     task="chat",
     temperature=None,
 ):
-    """Internet qidiruvi bilan javob beradi; qidiruv ishlamasa oddiy chatga qaytadi."""
+    """Yangilik va sport savollariga qidiruv yordamida javob beradi."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    query = (
-        f"{user_text}\n"
-        f"Agar savol bugungi voqea, sport yoki yangilik haqida bo'lsa, "
-        f"hozirgi sana-vaqt: {now}. Eng yangi ma'lumotni izla."
-    )
 
-    search_data = web_search(query, max_results=6)
+    text_lower = (user_text or "").lower()
+    sports_terms = (
+        "real madrid", "barcelona", "barselona", "manchester",
+        "liverpool", "chelsea", "arsenal", "psg", "bayern",
+        "futbol", "football", "uchrashuv", "o'yin", "oyin",
+        "qachon o'ynaydi", "qachon oynaydi", "hisob", "jadval",
+        "ucl", "champions league", "chempionlar ligasi",
+    )
+    is_sports = any(term in text_lower for term in sports_terms)
+
+    if is_sports:
+        search_queries = [
+            f"{user_text} next match fixtures official",
+            f"{user_text} official schedule latest",
+        ]
+    else:
+        search_queries = [user_text]
+
+    search_parts = []
+    seen_urls = set()
+
+    for query in search_queries:
+        result_text = web_search(query, max_results=5)
+        if result_text:
+            search_parts.append(result_text)
+
+    search_data = "\n\n".join(search_parts)
+
+    instructions = f"""
+Hozirgi sana-vaqt: {now}.
+
+JAVOB QOIDALARI:
+- Foydalanuvchiga uning tilida javob ber.
+- Yangilanadigan ma'lumotlarda qidiruv natijalaridan foydalan.
+- Manbada yo'q sana, vaqt, natija yoki faktni o'ylab topma.
+- Eski va yangi ma'lumotlar farq qilsa, eng yangi ishonchli manbani tanla.
+- O'yin vaqtini ko'rsatsang, vaqt mintaqasini ham yoz.
+- Ishonchli manba topilmasa, buni ochiq ayt.
+- Javob oxirida foydalanilgan manba havolalarini ko'rsat.
+"""
 
     if search_data:
-        search_system = (
+        final_system = (
             (system or "")
             + "\n\n"
+            + instructions
+            + "\n\n"
             + search_data
-            + """
+        )
+    else:
+        final_system = (
+            (system or "")
+            + "\n\n"
+            + instructions
+            + "\nInternet qidiruvi natija bermadi. "
+              "Jonli ma'lumotni tasdiqlay olmasang, taxmin qilma."
+        )
+
+    return chat(
+        history,
+        user_text,
+        final_system,
+        max_tokens=max_tokens,
+        task=task,
+        temperature=temperature,
+    )
 
 INTERNETDAN FOYDALANISH QOIDALARI:
 - Savolga qidiruv natijalaridagi ma'lumot asosida javob ber.
