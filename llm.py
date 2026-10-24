@@ -261,14 +261,34 @@ def _chat_groq(messages, system, image_b64, max_tokens=None, temperature=0.2):
     return _groq_text(resp.json(), "Groq")
 
 
-def _chat_openrouter(messages, system, image_b64, max_tokens=None, temperature=0.2):
-    model = config.OPENROUTER_MODEL
+
+ 
+def _chat_openrouter(
+    messages,
+    system,
+    image_b64,
+    max_tokens=None,
+    temperature=0.2,
+):
+    keys = getattr(config, "OPENROUTER_API_KEYS", [])
+    if not keys:
+        legacy_key = getattr(config, "OPENROUTER_API_KEY", "")
+        keys = [legacy_key] if legacy_key else []
+
+    if not keys:
+        raise LLMError("OpenRouter API kaliti sozlanmagan.")
+
+    model = (
+        config.OPENROUTER_VISION_MODEL
+        if image_b64
+        else config.OPENROUTER_MODEL
+    )
+
     msgs = [{"role": "system", "content": system}] + [
         dict(m) for m in messages
     ]
 
     if image_b64:
-        model = config.OPENROUTER_VISION_MODEL
         msgs[-1]["content"] = [
             {"type": "text", "text": msgs[-1]["content"]},
             {
@@ -282,27 +302,46 @@ def _chat_openrouter(messages, system, image_b64, max_tokens=None, temperature=0
     payload = {
         "model": model,
         "messages": msgs,
-        "temperature": temperature,
         "max_tokens": max_tokens or config.CHAT_MAX_TOKENS,
+        "temperature": temperature,
     }
 
-    resp = _call(
-        "OpenRouter",
-        lambda: _session.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": "Bearer " + config.OPENROUTER_API_KEY,
-                "X-Title": "AI Yordamchi",
-            },
-            json=payload,
-            timeout=max(config.REQUEST_TIMEOUT, 120)
-            if max_tokens and max_tokens > 4000
-            else config.REQUEST_TIMEOUT,
-        ),
-        attempts=2,
-    )
-    return _groq_text(resp.json(), "OpenRouter")
+    errors = []
 
+    for index, api_key in enumerate(keys, start=1):
+        try:
+            resp = _call(
+                f"OpenRouter kalit {index}",
+                lambda key=api_key: _session.post(
+                    OPENROUTER_URL,
+                    headers={
+                        "Authorization": "Bearer " + key,
+                        "X-Title": "AI Yordamchi",
+                    },
+                    json=payload,
+                    timeout=(
+                        max(config.REQUEST_TIMEOUT, 120)
+                        if max_tokens and max_tokens > 4000
+                        else config.REQUEST_TIMEOUT
+                    ),
+                ),
+                attempts=1,
+            )
+            return _groq_text(resp.json(), "OpenRouter")
+
+        except Exception as exc:
+            errors.append(str(exc))
+            log.warning(
+                "OpenRouter kalit %s ishlamadi: %s",
+                index,
+                exc,
+            )
+
+    raise LLMError(
+        "Ikkala OpenRouter kaliti ham ishlamadi. "
+        + " | ".join(errors)
+    )
+   
 
 def _chat_gemini(messages, system, image_b64, max_tokens=None, temperature=0.2):
     if not messages:
