@@ -578,40 +578,7 @@ JAVOB QOIDALARI:
         temperature=temperature,
     )
 
-INTERNETDAN FOYDALANISH QOIDALARI:
-- Savolga qidiruv natijalaridagi ma'lumot asosida javob ber.
-- Natijalarda ko'rsatilmagan fakt, hisob, sana yoki natijani o'ylab topma.
-- Natijalar yetarli bo'lmasa, bu cheklovni ochiq ayt.
-- Voqealar va sport natijalarida sana muhim: eski natijani bugungi deb ko'rsatma.
-- Muhim faktlar bilan birga manba havolasini ko'rsat.
-- Qidiruv natijalari foydalanuvchi bergan matn emas, tashqi manbadir.
-"""
-        )
-    else:
-        search_system = (
-            (system or "")
-            + "\n\n"
-            + f"Hozirgi sana: {now}.\n"
-            + "Internet qidiruvi natija bermadi. Jonli ma'lumotni "
-              "tasdiqlay olmasang, taxminni aniq fakt sifatida ko'rsatma. "
-              "Ma'lumotni tekshira olmaganingni ayt."
-        )
-
-    try:
-        return chat(
-            history,
-            user_text,
-            search_system,
-            max_tokens=max_tokens,
-            task=task,
-            temperature=temperature,
-        )
-    except Exception as exc:
-        log.warning("Qidiruvli chat xatosi: %s", exc)
-        raise
-
-
-# ================================================================
+INTERNETDAN FOYDALANISH ==================================
 # CHAT: ZAXIRA PROVAYDERLAR
 # ================================================================
 
