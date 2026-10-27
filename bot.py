@@ -1,23 +1,22 @@
-```python
+
 """
-AI Telegram Bot
+AI Telegram Bot — asosiy ishga tushirish fayli.
+
 Imkoniyatlar:
-- AI bilan suhbat va suhbat tarixidan foydalanish
-- Groq, OpenRouter va Gemini orqali AI javoblari
-- Internet qidiruvi
-- Rasmni tushunish, yaratish va tahrirlash
-- PDF, DOCX, XLSX, PPTX, TXT, CSV va boshqa hujjatlar
-- Ovozli xabarni matnga aylantirish
-- PowerPoint taqdimot yaratish
-- Foydalanuvchi limitlari va ruxsat nazorati
-- Northflank health-check va long polling
+- Groq, OpenRouter va Gemini orqali AI suhbat
+- Brave Search orqali internet qidiruvi
+- Suhbat tarixini saqlash va tozalash
+- Rasmni tahlil qilish, yaratish va tahrirlash
+- Hujjatlarni o'qish va yangi fayllar yaratish
+- Ovozli xabarlarni matnga aylantirish
+- Foydalanuvchi ruxsatlari va limitlari
+- Northflank uchun health-check
 """
 
 import functools
 import html
 import io
 import logging
-import os
 import re
 import signal
 import threading
@@ -38,12 +37,12 @@ from keyboards import MODES, main_menu, modes_menu
 
 
 # ============================================================
-# LOGGING VA TELEGRAM BOT
+# LOGGING VA BOT
 # ============================================================
 
 logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -58,111 +57,56 @@ bot = telebot.TeleBot(
 
 
 # ============================================================
-# FOYDALANUVCHI MATNLARI
+# FOYDALANUVCHIGA KO'RINADIGAN MATNLAR
 # ============================================================
 
 WELCOME = (
     "👋 <b>Salom, {name}!</b>\n\n"
-    "Men AI yordamchiman 🤖\n\n"
-    "💬 Savol bering — javob beraman.\n"
-    "🎤 Ovozli xabar yuboring — matnga aylantiraman.\n"
-    "🖼 Rasm yuboring — mazmunini tushuntiraman.\n"
-    "🎨 Rasm chizishni so'rang — yaratishga harakat qilaman.\n"
-    "✏️ Rasm yuborib, qanday o'zgartirish kerakligini yozing.\n"
-    "📄 Hujjat yuboring — o'qish, xulosa va tahrirlashga yordam beraman.\n"
-    "📊 Excel jadvali yoki PowerPoint taqdimot so'rashingiz mumkin.\n\n"
-    "Batafsil imkoniyatlar uchun /help buyrug'ini yuboring."
+    "Men sun'iy intellekt yordamchisiman. 🤖\n\n"
+    "💬 Savollaringizga javob beraman.\n"
+    "🌐 Kerak bo'lsa, internetdan ma'lumot qidiraman.\n"
+    "🖼 Rasmlarni tahlil qilaman.\n"
+    "🎨 Rasm yaratish va tahrirlashga yordam beraman.\n"
+    "📄 Hujjatlarni o'qish va yaratishni qo'llab-quvvatlayman.\n"
+    "📊 PowerPoint taqdimotlari va jadvallar tayyorlayman.\n"
+    "🎤 Ovozli xabarni matnga aylantira olaman.\n\n"
+    "Barcha buyruqlarni ko'rish uchun /help ni yuboring."
 )
 
 HELP = (
     "ℹ️ <b>BOT YORDAMI</b>\n\n"
-    "💬 <b>Suhbat</b>\n"
-    "Oddiy savol yozing. Bot oldingi suhbat kontekstidan foydalanadi.\n\n"
+    "💬 <b>Oddiy suhbat</b>\n"
+    "Savolingizni yozing. Bot mavjud suhbat tarixidan foydalanadi.\n\n"
     "🧠 <b>Buyruqlar</b>\n"
     "/start — botni boshlash\n"
     "/help — yordam\n"
     "/mode — javob rejimini tanlash\n"
-    "/clear — suhbat va vaqtinchalik fayl kontekstini tozalash\n"
+    "/clear — suhbat tarixini tozalash\n"
+    "/status — sozlamalar va limitlar holati\n"
     "/id — Telegram ID\n"
-    "/status — bot holati va limitlar\n"
     "/qidir so'rov — internetdan qidirish\n\n"
     "🎨 <b>Rasmlar</b>\n"
-    "/rasm tavsif — rasm yaratish\n"
-    "/tahrir o'zgarish — oxirgi rasmni tahrirlash\n"
-    "Rasm yuborib, tagiga savol yozishingiz ham mumkin.\n\n"
-    "📁 <b>Fayllar</b>\n"
-    "/fayl tavsif — hujjat yoki taqdimot yaratish\n"
-    "PDF, DOCX, XLSX, PPTX, TXT, CSV, JSON va qo'llab-quvvatlanadigan "
-    "boshqa formatdagi fayllarni yuboring.\n"
-    "Fayl ostiga savol yoki o'zgartirish ko'rsatmasini yozing.\n\n"
-    "📊 Misollar:\n"
-    "/fayl Sun'iy intellekt haqida 8 slaydli taqdimot\n"
-    "/fayl 10 ta mahsulot uchun Excel narxlar jadvali\n"
-    "/qidir Bugungi texnologiya yangiliklari\n\n"
-    "Eslatma: AI javoblari va qidiruv natijalarida xatolar bo'lishi mumkin."
+    "/rasm tavsif — yangi rasm yaratish\n"
+    "/tahrir ko'rsatma — oxirgi rasmni tahrirlash\n"
+    "Rasm yuborib, savolingizni ham yozishingiz mumkin.\n\n"
+    "📄 <b>Fayllar</b>\n"
+    "/fayl ko'rsatma — hujjat yoki taqdimot yaratish\n"
+    "PDF, Word, Excel, PowerPoint va qo'llab-quvvatlanadigan "
+    "boshqa fayllarni yuborishingiz mumkin.\n\n"
+    "📌 <b>Misollar</b>\n"
+    "/qidir sun'iy intellekt bo'yicha yangi yangiliklar\n"
+    "/fayl ekologiya haqida 8 slaydli taqdimot\n"
+    "/fayl mahsulotlar uchun Excel jadvali\n\n"
+    "Eslatma: AI javoblarini muhim holatlarda tekshirib oling."
 )
 
 
 # ============================================================
-# SO'ROVLARNI ANIQLASH
+# MATNNI ANIQLASH
 # ============================================================
-
-_DRAW_HINT = re.compile(
-    r"(\brasm|\bsurat|\bchiz|\btasvir|illyustr|"
-    r"\bdraw|\bpaint|\bsketch|\bimage|\bpicture|"
-    r"\blogo|\bposter|generate image|create image|"
-    r"создай изображение|расм|сурат|чиз|тасвир)",
-    re.I,
-)
-
-_EDIT_HINT = re.compile(
-    r"(\bfon|\brang|o'zgartir|zgartir|\bqora|oq-qora|"
-    r"\bqo'?sh|tashla|almashtir|\bedit|\bbackground|"
-    r"\bremove|\bfilter|\buslub|\bизмен|фон|ранг)",
-    re.I,
-)
-
-_FILE_HINT = re.compile(
-    r"(\bfayl|\bfile\b|\bdocx|\bword\b|\bpdf|\bexcel|"
-    r"\bxlsx|\bcsv|\btxt\b|\bjson|\bhujjat|\bjadval|"
-    r"\brezyume|\bresume|\bhisobot|\bprezentatsiya|"
-    r"\bpresentation|\btaqdimot|\bslayd|\bslide|"
-    r"\bpptx|\bpowerpoint|\bфайл|\bпрезентация)",
-    re.I,
-)
-
-_REALTIME_HINT = re.compile(
-    r"(bugun|bugungi|hozir|hozirgi|kecha|ertaga|joriy yil|"
-    r"shu yil|real.?vaqt|yangi|oxirgi|eng so'nggi|kurs|"
-    r"ob.?havo|narx|natija|hisob|o'?yin|match|futbol|"
-    r"football|soccer|premier league|la liga|champions league|"
-    r"\bucl\b|chempionlar|liga|turnir|ochko|gollar|transfer|"
-    r"tarkib|fikstura|fixtures|schedule|standings|kim o'ynaydi|"
-    r"kim oynaydi|kim bilan|qachon|soat necha|yangilik|voqea|"
-    r"valyuta|sana|qaysi kun|nechanchi|сегодня|сейчас|курс|"
-    r"погода|новости|футбол|матч|расписание)",
-    re.I,
-)
-
-_DOCEDIT_HINT = re.compile(
-    r"(tahrir|tuzat|qayta yoz|o'zgartir|zgartir|tarjima|"
-    r"qo'?sh|o'chir|qisqartir|kengaytir|formatla|"
-    r"to'g'rila|to'ldir|\bedit\b|\btranslate\b|\bfix\b|"
-    r"\brewrite\b|\bconvert\b|o'tkaz)",
-    re.I,
-)
-
-_IMAGE_FOLLOWUP_HINT = re.compile(
-    r"(shu rasm|bu rasm|o'sha rasm|oldingi rasm|"
-    r"rasmdagi|suratdagi|shu surat|bu surat|"
-    r"unda nima|uning rangi|rasmda nima|"
-    r"this image|that image|this picture|describe it)",
-    re.I,
-)
-
 
 def _norm(text: str) -> str:
-    """Matnni normal holatga keltirish."""
+    """Turli apostrof belgilarini bir xil ko'rinishga keltiradi."""
     if not text:
         return ""
 
@@ -174,6 +118,50 @@ def _norm(text: str) -> str:
     )
 
 
+_DRAW_HINT = re.compile(
+    r"(rasm|surat|chiz|tasvir|illyustr|draw|paint|sketch|"
+    r"image|picture|logo|poster|generate image|create image)",
+    re.I,
+)
+
+_EDIT_HINT = re.compile(
+    r"(fon|rang|o'zgartir|zgartir|qo'sh|tashla|almashtir|"
+    r"edit|background|remove|filter|uslub|qora-oq)",
+    re.I,
+)
+
+_FILE_HINT = re.compile(
+    r"(fayl|hujjat|docx|word|pdf|excel|xlsx|csv|txt|json|"
+    r"jadval|rezyume|resume|hisobot|prezentatsiya|presentation|"
+    r"taqdimot|slayd|slide|pptx|powerpoint)",
+    re.I,
+)
+
+_REALTIME_HINT = re.compile(
+    r"(bugun|bugungi|hozir|hozirgi|kecha|ertaga|joriy yil|"
+    r"shu yil|real.?vaqt|yangi|oxirgi|eng so'nggi|kurs|"
+    r"ob.?havo|narx|natija|futbol|football|soccer|"
+    r"premier league|la liga|champions league|ucl|transfer|"
+    r"yangilik|voqea|valyuta|qachon|soat necha|"
+    r"сегодня|сейчас|погода|новости|футбол)",
+    re.I,
+)
+
+_DOCEDIT_HINT = re.compile(
+    r"(tahrir|tuzat|qayta yoz|o'zgartir|tarjima|qo'sh|"
+    r"o'chir|qisqartir|kengaytir|formatla|to'g'rila|"
+    r"to'ldir|edit|translate|fix|rewrite|convert)",
+    re.I,
+)
+
+_IMAGE_FOLLOWUP_HINT = re.compile(
+    r"(shu rasm|bu rasm|oldingi rasm|rasmdagi|suratdagi|"
+    r"shu surat|bu surat|unda nima|rasmda nima|"
+    r"this image|that image|this picture|describe it)",
+    re.I,
+)
+
+
 def looks_like_image_request(text: str, has_image: bool) -> bool:
     text = _norm(text)
     return bool(
@@ -183,10 +171,10 @@ def looks_like_image_request(text: str, has_image: bool) -> bool:
 
 
 # ============================================================
-# TELEGRAM XABAR YUBORISH YORDAMCHILARI
+# XABAR YUBORISH YORDAMCHILARI
 # ============================================================
 
-def _send(chat_id: int, text: str, reply_to: int | None = None, **kwargs):
+def _send(chat_id, text, reply_to=None, **kwargs):
     try:
         return bot.send_message(
             chat_id,
@@ -200,7 +188,7 @@ def _send(chat_id: int, text: str, reply_to: int | None = None, **kwargs):
         raise
 
 
-def reply(message, text: str, **kwargs):
+def reply(message, text, **kwargs):
     return _send(
         message.chat.id,
         text,
@@ -209,16 +197,22 @@ def reply(message, text: str, **kwargs):
     )
 
 
-def send_long(message, text: str) -> None:
-    """Uzun javobni qismlarga bo'lib yuboradi."""
-    first = True
+def _safe_reply(message, text):
+    try:
+        reply(message, text)
+    except Exception:
+        log.exception("Xato xabarini foydalanuvchiga yuborib bo'lmadi")
 
-    for chunk in split_text(text or "", config.TELEGRAM_MAX_CHARS):
+
+def send_long(message, text):
+    """Uzun javoblarni Telegram chegarasiga moslab yuboradi."""
+    chunks = split_text(text or "", config.TELEGRAM_MAX_CHARS)
+
+    for index, chunk in enumerate(chunks):
         if not chunk.strip():
             continue
 
-        reply_to = message.message_id if first else None
-        first = False
+        reply_to = message.message_id if index == 0 else None
 
         try:
             _send(
@@ -228,11 +222,11 @@ def send_long(message, text: str) -> None:
                 parse_mode="HTML",
             )
         except ApiTelegramException:
-            # HTML formatlash xatosida oddiy matnga o'tamiz.
+            # HTML noto'g'ri bo'lsa, oddiy matn bilan qayta urinadi.
             _send(message.chat.id, chunk, reply_to)
 
 
-def send_photo(message, image_bytes: bytes) -> None:
+def send_photo(message, image_bytes):
     try:
         bot.send_photo(
             message.chat.id,
@@ -246,64 +240,53 @@ def send_photo(message, image_bytes: bytes) -> None:
             raise
 
 
-def send_document(
-    message,
-    name: str,
-    data: bytes,
-    caption: str = "",
-) -> None:
-    def _send_file(reply_to):
-        file_obj = io.BytesIO(data)
-        file_obj.name = name
+def send_document(message, name, data, caption=""):
+    file_obj = io.BytesIO(data)
+    file_obj.name = name
 
+    try:
         bot.send_document(
             message.chat.id,
             file_obj,
             caption=(caption[:1000] or None),
-            reply_to_message_id=reply_to,
+            reply_to_message_id=message.message_id,
         )
-
-    try:
-        _send_file(message.message_id)
     except ApiTelegramException as exc:
-        if "reply" in str(exc).lower():
-            _send_file(None)
-        else:
+        if "reply" not in str(exc).lower():
             raise
 
-
-def _safe_reply(message, text: str) -> None:
-    try:
-        reply(message, text)
-    except Exception:
-        log.exception("Xato xabarini yuborib bo'lmadi")
-
-
-def clear_all(user_id: int) -> None:
-    """Suhbat tarixini va vaqtinchalik hujjat kontekstini tozalaydi."""
-    state.clear_history(user_id)
-    docs.clear(user_id)
+        file_obj = io.BytesIO(data)
+        file_obj.name = name
+        bot.send_document(
+            message.chat.id,
+            file_obj,
+            caption=(caption[:1000] or None),
+        )
 
 
-def welcome_text(user) -> str:
-    return WELCOME.format(
-        name=html.escape(user.first_name or "do'st")
-    )
+def welcome_text(user):
+    name = html.escape(user.first_name or "do'st")
+    return WELCOME.format(name=name)
 
 
 # ============================================================
-# RUXSAT, LIMIT VA UMUMIY XATOLAR
+# RUXSATLAR VA UMUMIY XATOLAR
 # ============================================================
 
-def is_allowed(user_id: int) -> bool:
+def is_allowed(user_id):
     return (
         not config.ALLOWED_USERS
         or user_id in config.ALLOWED_USERS
     )
 
 
+def clear_all(user_id):
+    state.clear_history(user_id)
+    docs.clear(user_id)
+
+
 def protected(func):
-    """Ruxsat va foydalanuvchi navbatini tekshiradi."""
+    """Xabar handlerlari uchun ruxsat, navbat va xato nazorati."""
 
     @functools.wraps(func)
     def wrapper(message, *args, **kwargs):
@@ -315,54 +298,47 @@ def protected(func):
         if not is_allowed(user_id):
             _safe_reply(
                 message,
-                f"⛔ Bu botdan foydalanishga ruxsat yo'q.\n"
+                "⛔ Botdan foydalanishga ruxsat yo'q.\n"
                 f"Telegram ID: {user_id}",
             )
             return
 
         wait = state.rate_wait(user_id)
-
         if wait > 0:
             _safe_reply(
                 message,
-                f"⏳ Biroz kuting: taxminan {wait:.0f} soniyadan keyin "
-                "qayta urinib ko'ring.",
+                f"⏳ Iltimos, {wait:.0f} soniya kutib qayta urinib ko'ring.",
             )
             return
 
-        with state.user_slot(user_id) as allowed:
-            if not allowed:
+        with state.user_slot(user_id) as acquired:
+            if not acquired:
                 _safe_reply(
                     message,
-                    "⏳ Oldingi so'rovingiz hali bajarilmoqda. "
-                    "Iltimos, biroz kuting.",
+                    "⏳ Oldingi so'rovingiz hali bajarilmoqda.",
                 )
                 return
 
             try:
                 return func(message, *args, **kwargs)
 
-            except (
-                llm.LLMError,
-                images.ImageError,
-                docs.DocError,
-            ) as exc:
+            except (llm.LLMError, images.ImageError, docs.DocError) as exc:
                 log.warning(
-                    "Foydalanuvchi so'rovi bajarilmadi: %s",
-                    exc,
+                    "So'rov bajarilmadi: %s",
+                    type(exc).__name__,
                     exc_info=True,
                 )
                 _safe_reply(
                     message,
                     "⚠️ So'rovni bajarib bo'lmadi.\n"
-                    f"Sabab: {str(exc)[:700]}",
+                    f"Sabab: {str(exc)[:400]}",
                 )
 
             except ApiTelegramException:
                 log.exception("Telegram API xatosi")
                 _safe_reply(
                     message,
-                    "⚠️ Telegram xabarni yuborishda muammo yuz berdi. "
+                    "⚠️ Telegram bilan aloqa vaqtincha ishlamadi. "
                     "Birozdan keyin qayta urinib ko'ring.",
                 )
 
@@ -371,25 +347,18 @@ def protected(func):
                 _safe_reply(
                     message,
                     "❌ Kutilmagan xatolik yuz berdi. "
-                    "Keyinroq qayta urinib ko'ring.",
+                    "Xato qayd etildi, keyinroq qayta urinib ko'ring.",
                 )
 
     return wrapper
 
 
 # ============================================================
-# AI BILAN SUHBAT
+# AI SUHBAT VA INTERNET QIDIRUVI
 # ============================================================
 
-def do_chat(
-    message,
-    text: str,
-    image: bytes | None = None,
-    label: str | None = None,
-) -> None:
-    """AI javobini oladi va suhbat tarixiga saqlaydi."""
+def do_chat(message, text, image=None, label=None):
     user_id = message.from_user.id
-
     bot.send_chat_action(message.chat.id, "typing")
 
     system = MODES[state.get_mode(user_id)][1]
@@ -400,14 +369,15 @@ def do_chat(
 
     history = state.get_history(user_id)
 
-    if not image and _REALTIME_HINT.search(_norm(text)):
-        log.info("Internet qidiruvi kerak bo'lishi mumkin: %s", text)
-
-        answer = llm.chat_with_search(
-            history,
-            text,
-            system,
-        )
+    if image is None and _REALTIME_HINT.search(_norm(text)):
+        try:
+            answer = llm.chat_with_search(history, text, system)
+        except Exception:
+            log.warning(
+                "Internet qidiruvi muvaffaqiyatsiz; oddiy AI javobiga o'tilmoqda",
+                exc_info=True,
+            )
+            answer = llm.chat_multi(history, text, system)
     else:
         try:
             answer = llm.chat_multi(
@@ -416,13 +386,11 @@ def do_chat(
                 system,
                 image=image,
             )
-        except Exception as exc:
+        except Exception:
             log.warning(
-                "Ko'p provayderli chat xatosi, zaxira usuli: %s",
-                exc,
+                "Ko'p provayderli chat xatosi; zaxira usuli sinab ko'riladi",
                 exc_info=True,
             )
-
             answer = llm.chat(
                 history,
                 text,
@@ -430,12 +398,7 @@ def do_chat(
                 image=image,
             )
 
-    state.remember(
-        user_id,
-        label or text,
-        answer,
-    )
-
+    state.remember(user_id, label or text, answer)
     send_long(message, answer)
 
 
@@ -443,78 +406,55 @@ def do_chat(
 # RASM YARATISH VA TAHRIRLASH
 # ============================================================
 
-def _deliver_image(
-    message,
-    image_bytes: bytes,
-    note: str,
-) -> None:
-    user_id = message.from_user.id
-
-    if not image_bytes:
-        raise images.ImageError("Rasm yaratish xizmati bo'sh natija qaytardi.")
-
-    # Rasmni saqlash va keyingi savollarda ishlatish.
-    try:
-        state.set_image(user_id, images.shrink(image_bytes))
-    except Exception:
-        log.warning(
-            "Rasmni suhbat xotirasiga saqlash amalga oshmadi",
-            exc_info=True,
-        )
-
-    send_photo(message, image_bytes)
-    state.count_image(user_id)
-    state.remember(user_id, note, "[Rasm yuborildi]")
-
-
-def _check_image_quota(message) -> bool:
+def _check_image_quota(message):
     if not config.IMAGES_ENABLED:
-        reply(
-            message,
-            "🎨 Rasm funksiyasi hozircha sozlanmagan.",
-        )
+        reply(message, "🎨 Rasm xizmati hozircha sozlanmagan.")
         return False
 
     if state.images_left(message.from_user.id) <= 0:
         reply(
             message,
-            f"🎨 Bugungi rasm limiti "
-            f"({config.IMAGE_DAILY_LIMIT} ta) tugadi. "
-            "Ertaga qayta urinib ko'ring.",
+            f"🎨 Bugungi rasm limiti ({config.IMAGE_DAILY_LIMIT} ta) tugadi.",
         )
         return False
 
     return True
 
 
-def do_draw(message, prompt: str, note: str) -> None:
+def _deliver_image(message, image_bytes, note):
+    if not image_bytes:
+        raise images.ImageError("Rasm xizmati bo'sh natija qaytardi.")
+
+    user_id = message.from_user.id
+
+    try:
+        state.set_image(user_id, images.shrink(image_bytes))
+    except Exception:
+        log.warning("Rasm xotiraga saqlanmadi", exc_info=True)
+
+    send_photo(message, image_bytes)
+    state.count_image(user_id)
+    state.remember(user_id, note, "[Rasm yuborildi]")
+
+
+def do_draw(message, prompt, note):
     if not _check_image_quota(message):
         return
 
     bot.send_chat_action(message.chat.id, "upload_photo")
-
     result = images.make_image(prompt)
     _deliver_image(message, result, note)
 
 
-def do_edit(
-    message,
-    image_bytes: bytes | None,
-    prompt: str,
-    note: str,
-) -> None:
+def do_edit(message, image_bytes, prompt, note):
     if image_bytes is None:
-        reply(
-            message,
-            "✏️ Avval tahrirlash uchun rasm yuboring.",
-        )
+        reply(message, "✏️ Avval rasm yuboring, keyin tahrirlashni so'rang.")
         return
 
     if not _check_image_quota(message):
         return
 
     bot.send_chat_action(message.chat.id, "upload_photo")
-
     result = images.edit_image(image_bytes, prompt)
     _deliver_image(message, result, note)
 
@@ -523,7 +463,7 @@ def do_edit(
 # FAYL VA TAQDIMOT YARATISH
 # ============================================================
 
-def do_file(message, instruction: str) -> None:
+def do_file(message, instruction):
     user_id = message.from_user.id
 
     if (
@@ -532,8 +472,7 @@ def do_file(message, instruction: str) -> None:
     ):
         reply(
             message,
-            f"📄 Bugungi fayl limiti "
-            f"({config.FILE_DAILY_LIMIT} ta) tugadi.",
+            f"📄 Bugungi fayl limiti ({config.FILE_DAILY_LIMIT} ta) tugadi.",
         )
         return
 
@@ -551,16 +490,10 @@ def do_file(message, instruction: str) -> None:
         allow_images=allow_images,
     )
 
-    # Taqdimotdagi har bir muvaffaqiyatli rasmni hisoblash.
-    if result.images_added:
-        for _ in range(result.images_added):
-            state.count_image(user_id)
+    for _ in range(getattr(result, "images_added", 0)):
+        state.count_image(user_id)
 
-    docs.store(
-        user_id,
-        result.name,
-        result.text,
-    )
+    docs.store(user_id, result.name, result.text)
 
     send_document(
         message,
@@ -578,13 +511,13 @@ def do_file(message, instruction: str) -> None:
 
 
 # ============================================================
-# MATNNI TO'G'RI YO'NALISHGA UZATISH
+# SO'ROVNI TO'G'RI FUNKSIYAGA YO'NALTIRISH
 # ============================================================
 
-def route_text(message, text: str) -> None:
+def route_text(message, text):
     user_id = message.from_user.id
-
     normalized = _norm(text)
+
     last_image = (
         state.get_image(user_id)
         if config.IMAGES_ENABLED
@@ -596,19 +529,14 @@ def route_text(message, text: str) -> None:
         config.IMAGES_ENABLED
         and looks_like_image_request(text, last_image is not None)
     )
-
     wants_file = bool(
         _FILE_HINT.search(normalized)
-        or (
-            uploaded_doc
-            and _DOCEDIT_HINT.search(normalized)
-        )
+        or (uploaded_doc and _DOCEDIT_HINT.search(normalized))
     )
 
     action = "chat"
     prompt = ""
 
-    # Tasniflashni faqat maxsus funksiya talab qilinganda ishlatamiz.
     if wants_image or wants_file:
         try:
             action, prompt = llm.classify_vote(
@@ -617,7 +545,7 @@ def route_text(message, text: str) -> None:
                 uploaded_doc is not None,
             )
         except Exception:
-            log.exception("So'rovni tasniflash muvaffaqiyatsiz bo'ldi")
+            log.exception("So'rov turini aniqlashda xato")
 
             if wants_image:
                 if last_image is not None and _EDIT_HINT.search(normalized):
@@ -627,33 +555,26 @@ def route_text(message, text: str) -> None:
             elif wants_file:
                 action = "file"
 
-    # Oldingi rasm haqida davomiy savol.
     if (
         action == "chat"
         and last_image is not None
         and _IMAGE_FOLLOWUP_HINT.search(normalized)
         and not wants_file
     ):
-        do_chat(
-            message,
-            text,
-            image=last_image,
-        )
+        do_chat(message, text, image=last_image)
         return
 
     if action in ("draw", "edit") and not config.IMAGES_ENABLED:
         action = "chat"
 
     if action == "draw":
-        prompt = llm.refine_prompt(text)
-        do_draw(message, prompt or text, text)
+        do_draw(message, llm.refine_prompt(prompt or text), text)
 
     elif action == "edit":
-        prompt = llm.refine_prompt(text)
         do_edit(
             message,
-            state.get_image(user_id),
-            prompt or text,
+            last_image,
+            llm.refine_prompt(prompt or text),
             text,
         )
 
@@ -668,55 +589,29 @@ def route_text(message, text: str) -> None:
 # RASM XABARLARI
 # ============================================================
 
-def handle_image(message, file_id: str, caption: str | None) -> None:
+def handle_image(message, file_id, caption):
     try:
         file_info = bot.get_file(file_id)
         raw_image = bot.download_file(file_info.file_path)
         image_bytes = images.shrink(raw_image)
     except Exception:
-        log.exception("Rasmni yuklab olish yoki o'qish muvaffaqiyatsiz")
-        reply(
-            message,
-            "🖼 Rasmni o'qib bo'lmadi. JPG yoki PNG formatida "
-            "qayta yuborib ko'ring.",
-        )
+        log.exception("Rasmni yuklab olish yoki o'qishda xato")
+        reply(message, "🖼 Rasmni o'qib bo'lmadi. JPG yoki PNG yuborib ko'ring.")
         return
 
     state.set_image(message.from_user.id, image_bytes)
-
     caption = (caption or "").strip()
 
-    if caption and config.IMAGES_ENABLED:
-        if caption.lower().startswith("/tahrir"):
-            instruction = caption.partition(" ")[2].strip()
-
-            if not instruction:
-                reply(
-                    message,
-                    "Nima o'zgartirish kerakligini yozing:\n"
-                    "/tahrir fonni tun qil",
-                )
-                return
-
-            do_edit(
-                message,
-                image_bytes,
-                llm.refine_prompt(instruction),
-                caption,
-            )
-            return
-
-        if _EDIT_HINT.search(_norm(caption)):
-            do_edit(
-                message,
-                image_bytes,
-                llm.refine_prompt(caption),
-                caption,
-            )
-            return
+    if caption and config.IMAGES_ENABLED and _EDIT_HINT.search(_norm(caption)):
+        do_edit(
+            message,
+            image_bytes,
+            llm.refine_prompt(caption),
+            caption,
+        )
+        return
 
     question = caption or "Bu rasmda nima bor? Batafsil tushuntirib ber."
-
     do_chat(
         message,
         question,
@@ -728,15 +623,6 @@ def handle_image(message, file_id: str, caption: str | None) -> None:
 # ============================================================
 # BUYRUQLAR
 # ============================================================
-
-@bot.message_handler(commands=["id"], chat_types=["private"])
-@protected
-def cmd_id(message):
-    reply(
-        message,
-        f"🆔 Telegram ID: {message.from_user.id}",
-    )
-
 
 @bot.message_handler(commands=["start"], chat_types=["private"])
 @protected
@@ -760,15 +646,17 @@ def cmd_help(message):
     )
 
 
+@bot.message_handler(commands=["id"], chat_types=["private"])
+@protected
+def cmd_id(message):
+    reply(message, f"🆔 Telegram ID: {message.from_user.id}")
+
+
 @bot.message_handler(commands=["clear"], chat_types=["private"])
 @protected
 def cmd_clear(message):
     clear_all(message.from_user.id)
-
-    reply(
-        message,
-        "🧹 Suhbat tarixi va vaqtinchalik hujjat konteksti tozalandi.",
-    )
+    reply(message, "🧹 Suhbat tarixi va vaqtinchalik hujjat konteksti tozalandi.")
 
 
 @bot.message_handler(commands=["mode"], chat_types=["private"])
@@ -778,9 +666,7 @@ def cmd_mode(message):
         message,
         "🎭 <b>Javob rejimini tanlang:</b>",
         parse_mode="HTML",
-        reply_markup=modes_menu(
-            state.get_mode(message.from_user.id)
-        ),
+        reply_markup=modes_menu(state.get_mode(message.from_user.id)),
     )
 
 
@@ -790,20 +676,31 @@ def cmd_draw(message):
     prompt = (message.text or "").partition(" ")[2].strip()
 
     if not prompt:
-        reply(
-            message,
-            "Tavsif yozing:\n"
-            "/rasm quyosh botayotgan dengiz",
-        )
+        reply(message, "Tavsif yozing:\n/rasm quyosh botayotgan dengiz")
         return
 
-    if not _check_image_quota(message):
+    do_draw(message, llm.refine_prompt(prompt), prompt)
+
+
+@bot.message_handler(commands=["tahrir"], chat_types=["private"])
+@protected
+def cmd_edit(message):
+    instruction = (message.text or "").partition(" ")[2].strip()
+
+    if not instruction:
+        reply(message, "Ko'rsatma yozing:\n/tahrir fonni ko'k rangga o'zgartir")
         return
 
-    do_draw(
+    image_bytes = state.get_image(message.from_user.id)
+    if image_bytes is None:
+        reply(message, "✏️ Avval tahrirlash uchun rasm yuboring.")
+        return
+
+    do_edit(
         message,
-        llm.refine_prompt(prompt),
-        prompt,
+        image_bytes,
+        llm.refine_prompt(instruction),
+        instruction,
     )
 
 
@@ -817,45 +714,12 @@ def cmd_file(message):
             message,
             "Qanday fayl kerakligini yozing:\n\n"
             "/fayl Sun'iy intellekt haqida 8 slaydli taqdimot\n"
-            "/fayl 5 ta mahsulot uchun Excel jadvali\n"
-            "/fayl O'zbekistonda ekologiya haqida Word hujjati",
+            "/fayl Mahsulotlar uchun Excel jadvali\n"
+            "/fayl Ekologiya haqida Word hujjati",
         )
         return
 
     do_file(message, instruction)
-
-
-@bot.message_handler(commands=["tahrir"], chat_types=["private"])
-@protected
-def cmd_edit(message):
-    instruction = (message.text or "").partition(" ")[2].strip()
-
-    if not instruction:
-        reply(
-            message,
-            "Nima o'zgartirish kerakligini yozing:\n"
-            "/tahrir fonni tun rangiga o'zgartir",
-        )
-        return
-
-    image_bytes = state.get_image(message.from_user.id)
-
-    if image_bytes is None:
-        reply(
-            message,
-            "✏️ Avval tahrirlash uchun rasm yuboring.",
-        )
-        return
-
-    if not _check_image_quota(message):
-        return
-
-    do_edit(
-        message,
-        image_bytes,
-        llm.refine_prompt(instruction),
-        instruction,
-    )
 
 
 @bot.message_handler(commands=["status"], chat_types=["private"])
@@ -866,37 +730,27 @@ def cmd_status(message):
 
     if config.GROQ_API_KEY:
         providers.append("Groq")
-
     if config.OPENROUTER_API_KEY:
         providers.append("OpenRouter")
-
     if config.GEMINI_API_KEY:
         providers.append("Gemini")
 
     mode = MODES[state.get_mode(user_id)][0]
 
-    status_text = (
+    text = (
         "🤖 <b>BOT HOLATI</b>\n\n"
-        f"🧠 Sozlangan AI provayderlari: "
-        f"{html.escape(', '.join(providers) or 'Topilmadi')}\n"
-        f"🎨 Rasm yaratish: "
-        f"{'Yoqilgan' if config.IMAGES_ENABLED else 'O‘chiq'}\n"
-        f"🎭 Javob rejimi: {html.escape(str(mode))}\n"
-        f"🖼 Bugungi rasm limiti qoldig'i: "
-        f"{state.images_left(user_id)}\n"
-        f"📄 Bugungi fayl limiti qoldig'i: "
-        f"{state.files_left(user_id)}\n"
-        f"💬 Xotiradagi yozuvlar: "
-        f"{len(state.get_history(user_id))}\n\n"
-        "Eslatma: bu tekshiruv API xizmatlarining haqiqiy ishlashini "
-        "sinamaydi, faqat sozlangan kalitlar mavjudligini ko'rsatadi."
+        f"🧠 Sozlangan provayderlar: {html.escape(', '.join(providers) or 'Topilmadi')}\n"
+        f"🌐 Brave Search: {'Sozlangan' if config.BRAVE_SEARCH_ENABLED else 'Kalit topilmadi'}\n"
+        f"🎨 Rasm yaratish: {'Yoqilgan' if config.IMAGES_ENABLED else 'O‘chiq'}\n"
+        f"🎭 Rejim: {html.escape(str(mode))}\n"
+        f"🖼 Rasm limiti qoldig'i: {state.images_left(user_id)}\n"
+        f"📄 Fayl limiti qoldig'i: {state.files_left(user_id)}\n"
+        f"💬 Xotiradagi xabarlar: {len(state.get_history(user_id))}\n\n"
+        "Eslatma: bu yerda kalit mavjudligi tekshiriladi; "
+        "barcha API xizmatlari jonli sinovdan o'tkazilmaydi."
     )
 
-    reply(
-        message,
-        status_text,
-        parse_mode="HTML",
-    )
+    reply(message, text, parse_mode="HTML")
 
 
 @bot.message_handler(commands=["qidir"], chat_types=["private"])
@@ -905,32 +759,34 @@ def cmd_search(message):
     query = (message.text or "").partition(" ")[2].strip()
 
     if not query:
+        reply(message, "🔎 So'rov yozing:\n/qidir sun'iy intellekt yangiliklari")
+        return
+
+    if not config.BRAVE_SEARCH_ENABLED:
         reply(
             message,
-            "🔎 Qidiruv so'rovini yozing:\n"
-            "/qidir bugungi texnologiya yangiliklari",
+            "🌐 Brave Search API kaliti sozlanmagan. "
+            "Northflank'dagi BRAVE_API_KEY qiymatini tekshiring.",
         )
         return
 
     bot.send_chat_action(message.chat.id, "typing")
 
     results = llm.web_search(query, max_results=5)
-
     if not results:
         reply(
             message,
-            "🔎 Qidiruv natijasi topilmadi. "
-            "Boshqa so'zlar bilan urinib ko'ring.",
+            "🔎 Qidiruv natijasi topilmadi yoki xizmat javob bermadi. "
+            "So'rovni o'zgartirib qayta urinib ko'ring.",
         )
         return
 
     system = MODES[state.get_mode(message.from_user.id)][1]
     system += (
         "\n\nQuyidagi internet qidiruv natijalaridan foydalan. "
-        "Manbalarda bo'lmagan faktlarni o'ylab topma. "
-        "Agar manbalar qarama-qarshi bo'lsa yoki ma'lumot yetarli "
-        "bo'lmasa, buni ochiq ayt.\n\n"
-        + results
+        "Manbalarda bo'lmagan faktlarni uydirma. "
+        "Agar ma'lumot yetarli bo'lmasa, buni ochiq ayt.\n\n"
+        + str(results)
     )
 
     answer = llm.chat(
@@ -944,15 +800,14 @@ def cmd_search(message):
         f"[Internet qidiruvi] {query}",
         answer,
     )
-
     send_long(message, answer)
 
 
 # ============================================================
-# TUGMALAR VA CALLBACKLAR
+# TUGMALAR
 # ============================================================
 
-def _edit_message(chat_id: int, message_id: int, text: str, markup):
+def _edit_message(chat_id, message_id, text, markup):
     try:
         bot.edit_message_text(
             text,
@@ -966,7 +821,7 @@ def _edit_message(chat_id: int, message_id: int, text: str, markup):
             raise
 
 
-def _edit_markup(chat_id: int, message_id: int, markup):
+def _edit_markup(chat_id, message_id, markup):
     try:
         bot.edit_message_reply_markup(
             chat_id,
@@ -980,14 +835,14 @@ def _edit_markup(chat_id: int, message_id: int, markup):
 
 @bot.callback_query_handler(func=lambda call: True)
 def on_callback(call):
-    user_id = call.from_user.id
     toast = None
 
     try:
-        if not is_allowed(user_id):
+        if not is_allowed(call.from_user.id):
             toast = "⛔ Ruxsat yo'q"
 
-        elif call.message is not None:
+        elif call.message:
+            user_id = call.from_user.id
             chat_id = call.message.chat.id
             message_id = call.message.message_id
             data = call.data or ""
@@ -1002,14 +857,9 @@ def on_callback(call):
 
             elif data.startswith("mode:"):
                 key = data.split(":", 1)[1]
-
                 if key in MODES:
                     state.set_mode(user_id, key)
-                    _edit_markup(
-                        chat_id,
-                        message_id,
-                        modes_menu(key),
-                    )
+                    _edit_markup(chat_id, message_id, modes_menu(key))
                     toast = f"Rejim: {MODES[key][0]}"
 
             elif data == "menu:clear":
@@ -1017,12 +867,7 @@ def on_callback(call):
                 toast = "🧹 Suhbat tozalandi"
 
             elif data == "menu:help":
-                _edit_message(
-                    chat_id,
-                    message_id,
-                    HELP,
-                    main_menu(),
-                )
+                _edit_message(chat_id, message_id, HELP, main_menu())
 
             elif data == "menu:back":
                 _edit_message(
@@ -1038,21 +883,18 @@ def on_callback(call):
 
     finally:
         try:
-            bot.answer_callback_query(
-                call.id,
-                text=toast,
-            )
+            bot.answer_callback_query(call.id, text=toast)
         except Exception:
             log.debug("Callback javobini yuborib bo'lmadi")
 
 
 # ============================================================
-# MATNLI XABARLAR
+# MATN, RASM, HUJJAT VA OVOZ HANDLERLARI
 # ============================================================
 
 @bot.message_handler(
     content_types=["text"],
-    func=lambda message: not (message.text or "").startswith("/"),
+    func=lambda m: not (m.text or "").startswith("/"),
     chat_types=["private"],
 )
 @protected
@@ -1060,55 +902,30 @@ def on_text(message):
     route_text(message, message.text or "")
 
 
-# ============================================================
-# RASM XABARLARI
-# ============================================================
-
-@bot.message_handler(
-    content_types=["photo"],
-    chat_types=["private"],
-)
+@bot.message_handler(content_types=["photo"], chat_types=["private"])
 @protected
 def on_photo(message):
-    handle_image(
-        message,
-        message.photo[-1].file_id,
-        message.caption,
-    )
+    handle_image(message, message.photo[-1].file_id, message.caption)
 
 
 @bot.message_handler(
     content_types=["document"],
-    func=lambda message: bool(
-        message.document
-        and (message.document.mime_type or "").startswith("image/")
+    func=lambda m: bool(
+        m.document
+        and (m.document.mime_type or "").startswith("image/")
     ),
     chat_types=["private"],
 )
 @protected
 def on_image_document(message):
     if (message.document.file_size or 0) > 10 * 1024 * 1024:
-        reply(
-            message,
-            "🖼 Rasm juda katta. 10 MB dan kichik rasm yuboring.",
-        )
+        reply(message, "🖼 Rasm juda katta. 10 MB dan kichik rasm yuboring.")
         return
 
-    handle_image(
-        message,
-        message.document.file_id,
-        message.caption,
-    )
+    handle_image(message, message.document.file_id, message.caption)
 
 
-# ============================================================
-# HUJJAT YUKLASH VA O'QISH
-# ============================================================
-
-@bot.message_handler(
-    content_types=["document"],
-    chat_types=["private"],
-)
+@bot.message_handler(content_types=["document"], chat_types=["private"])
 @protected
 def on_file_document(message):
     document = message.document
@@ -1116,7 +933,7 @@ def on_file_document(message):
     if (document.file_size or 0) > docs.MAX_FILE_BYTES:
         reply(
             message,
-            "📄 Fayl juda katta. Maksimal hajm: "
+            f"📄 Fayl juda katta. Maksimal hajm: "
             f"{docs.MAX_FILE_BYTES // (1024 * 1024)} MB.",
         )
         return
@@ -1127,24 +944,13 @@ def on_file_document(message):
     docs.precheck(name, mime_type)
 
     bot.send_chat_action(message.chat.id, "typing")
-
     file_info = bot.get_file(document.file_id)
     raw = bot.download_file(file_info.file_path)
 
-    text, truncated = docs.extract(
-        name,
-        raw,
-        mime_type,
-    )
-
+    text, truncated = docs.extract(name, raw, mime_type)
     user_id = message.from_user.id
 
-    docs.store(
-        user_id,
-        name,
-        text,
-        truncated,
-    )
+    docs.store(user_id, name, text, truncated)
 
     if truncated:
         reply(
@@ -1158,19 +964,14 @@ def on_file_document(message):
     if not caption:
         do_chat(
             message,
-            f"Men «{name}» faylini yubordim. "
-            "Mazmunini 3–5 gapda tushuntir va asosiy fikrlarini "
-            "sanab ber.",
+            f"Men «{name}» faylini yubordim. Mazmunini 3–5 gapda "
+            "tushuntir va asosiy fikrlarini sanab ber.",
             label=f"[Fayl yuklandi] {name}",
         )
         return
 
     try:
-        action, _ = llm.classify_vote(
-            caption,
-            False,
-            True,
-        )
+        action, _ = llm.classify_vote(caption, False, True)
     except Exception:
         log.exception("Fayl ko'rsatmasini tasniflash xatosi")
         action = "file" if _FILE_HINT.search(caption) else "chat"
@@ -1178,21 +979,10 @@ def on_file_document(message):
     if action == "file":
         do_file(message, caption)
     else:
-        do_chat(
-            message,
-            caption,
-            label=f"[Fayl: {name}] {caption}",
-        )
+        do_chat(message, caption, label=f"[Fayl: {name}] {caption}")
 
 
-# ============================================================
-# OVOZLI XABARLAR
-# ============================================================
-
-@bot.message_handler(
-    content_types=["voice"],
-    chat_types=["private"],
-)
+@bot.message_handler(content_types=["voice"], chat_types=["private"])
 @protected
 def on_voice(message):
     voice = message.voice
@@ -1206,46 +996,26 @@ def on_voice(message):
         return
 
     bot.send_chat_action(message.chat.id, "typing")
-
     file_info = bot.get_file(voice.file_id)
     audio_bytes = bot.download_file(file_info.file_path)
 
-    text = llm.transcribe(
-        audio_bytes,
-        filename="voice.ogg",
-    )
-
+    text = llm.transcribe(audio_bytes, filename="voice.ogg")
     if not text:
-        reply(
-            message,
-            "🎤 Ovozli xabarni tushunib bo'lmadi. "
-            "Qayta yozib ko'ring.",
-        )
+        reply(message, "🎤 Ovozli xabarni tushunib bo'lmadi. Qayta urinib ko'ring.")
         return
 
     reply(
         message,
-        "🎤 <b>Tushunilgan matn:</b>\n"
-        + html.escape(text[:1000]),
+        "🎤 <b>Tushunilgan matn:</b>\n" + html.escape(text[:1000]),
         parse_mode="HTML",
     )
-
     route_text(message, text)
 
 
-# ============================================================
-# QO'LLAB-QUVVATLANMAYDIGAN XABAR TURLARI
-# ============================================================
-
 @bot.message_handler(
     content_types=[
-        "video",
-        "audio",
-        "sticker",
-        "video_note",
-        "animation",
-        "location",
-        "contact",
+        "video", "audio", "sticker", "video_note",
+        "animation", "location", "contact",
     ],
     chat_types=["private"],
 )
@@ -1254,12 +1024,12 @@ def on_other(message):
         reply(
             message,
             "📝 Hozircha matn, rasm, ovozli xabar va hujjatlarni "
-            "(PDF, Word, Excel va boshqalar) qayta ishlay olaman.",
+            "qayta ishlay olaman.",
         )
 
 
 # ============================================================
-# NORTHFLANK HEALTH CHECK
+# NORTHFLANK HEALTH-CHECK
 # ============================================================
 
 class _Health(BaseHTTPRequestHandler):
@@ -1270,46 +1040,41 @@ class _Health(BaseHTTPRequestHandler):
         self.wfile.write(b"ok")
 
     def log_message(self, *args):
-        pass
+        return
 
 
-def start_health_server() -> None:
-    """Northflank health-check uchun HTTP server."""
-    if not config.HEALTH_PORT:
+def start_health_server():
+    port = config.HEALTH_PORT
+    if not port:
         return
 
     try:
-        server = ThreadingHTTPServer(
-            ("0.0.0.0", config.HEALTH_PORT),
-            _Health,
-        )
+        server = ThreadingHTTPServer(("0.0.0.0", port), _Health)
     except OSError:
-        log.exception("Health server ishga tushmadi")
+        log.exception("Health-check server ishga tushmadi")
         return
 
-    thread = threading.Thread(
+    threading.Thread(
         target=server.serve_forever,
         daemon=True,
-    )
-    thread.start()
+    ).start()
 
-    log.info("Health server %s-portda ishlayapti", config.HEALTH_PORT)
+    log.info("Health-check server %s-portda ishlayapti", port)
 
 
 # ============================================================
-# TO'XTATISH VA ISHGA TUSHIRISH
+# ISHGA TUSHIRISH VA TO'XTATISH
 # ============================================================
 
-def _shutdown(signum, _frame) -> None:
+def _shutdown(signum, _frame):
     log.info("Signal %s qabul qilindi. Bot to'xtatilmoqda.", signum)
-
     try:
         bot.stop_polling()
     except Exception:
         log.exception("Pollingni to'xtatishda xato")
 
 
-def main() -> None:
+def main():
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
@@ -1317,7 +1082,6 @@ def main() -> None:
 
     # Eski webhook long pollingga xalaqit bermasligi uchun.
     bot.remove_webhook()
-
     me = bot.get_me()
 
     commands = [
@@ -1336,20 +1100,15 @@ def main() -> None:
     try:
         bot.set_my_commands(commands)
     except Exception:
-        log.exception("Telegram buyruqlari ro'yxatini o'rnatib bo'lmadi")
+        log.exception("Telegram buyruqlarini o'rnatib bo'lmadi")
 
     log.info(
-        "@%s ishga tushdi | chat modeli: %s | rasm: %s | "
-        "Gemini kaliti: %s | ruxsat: %s",
+        "Bot ishga tushdi | username=@%s | model=%s | "
+        "Brave=%s | rasm=%s",
         me.username,
         config.CHAT_MODEL,
+        "sozlangan" if config.BRAVE_SEARCH_ENABLED else "sozlanmagan",
         "yoqilgan" if config.IMAGES_ENABLED else "o'chiq",
-        "bor" if config.GEMINI_API_KEY else "yo'q",
-        (
-            f"{len(config.ALLOWED_USERS)} ta foydalanuvchi"
-            if config.ALLOWED_USERS
-            else "barcha foydalanuvchilar"
-        ),
     )
 
     bot.infinity_polling(
@@ -1362,4 +1121,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-```
