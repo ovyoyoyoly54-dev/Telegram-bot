@@ -81,6 +81,11 @@ _IMAGE_HOWTO = re.compile(
     r"\b(how\s+(?:do\s+i|to)|qanday\s+qilib|\u043a\u0430\u043a\s+(?:\u043c\u043d\u0435|\u043c\u043e\u0436\u043d\u043e))\b",
     re.I,
 )
+_IMAGE_CORRECTION = re.compile(
+    r"\b(emas|xato|noto'g'ri|adash|wrong|instead|incorrect|not|"
+    r"\u043d\u0435\u0442|\u043d\u0435\u043f\u0440\u0430\u0432\u0438\u043b\u044c\u043d|\u0432\u043c\u0435\u0441\u0442\u043e)\b",
+    re.I,
+)
 _EDIT_HINT = re.compile(
     r"\b(tahrir|fonini|fonni|rangini|o'zgartir|"
     r"ozgartir|almashtir|olib tashla|qo'shib ber|edit image)\b",
@@ -156,6 +161,33 @@ def _refine_image_prompt(text):
             "ASCII art, or illustration."
         )
     return prompt[:1800]
+
+
+def _refine_image_correction(previous_prompt, correction):
+    """Make the latest correction override the subject of the prior image."""
+    normalized = _norm(correction)
+    match = re.search(r"(.{1,100}?)\bemas\b(.{1,100})", normalized, re.I)
+    if match:
+        rejected = " ".join(match.group(1).split()[-4:]).strip(" ,.!?:;")
+        desired = re.split(
+            r"\b(deb|bo'lsin|qaytib|yozsam|qil|qilib|ber|iltimos)\b",
+            match.group(2),
+            maxsplit=1,
+        )[0].strip(" ,.!?:;")
+        instruction = (
+            f"The previous request was: {previous_prompt}. "
+            f"The user's latest correction is: {correction}. "
+            f"The rejected subject is {rejected}. The desired subject is {desired}. "
+            f"Depict only {desired}; do not depict {rejected}. The latest correction "
+            "overrides the earlier result. Make a photorealistic real-life photograph."
+        )
+    else:
+        instruction = (
+            f"Previous image request: {previous_prompt}. Latest user correction: "
+            f"{correction}. Follow the correction as authoritative, replace the "
+            "mistaken subject, and create a photorealistic real-life photograph."
+        )
+    return _refine_image_prompt(instruction)
 
 
 def is_presentation_request(text):
@@ -383,8 +415,8 @@ def deliver_image(message, data, note):
         state.set_image(user_id, images.shrink(data))
     except Exception:
         log.warning("Rasm keshga saqlanmadi", exc_info=True)
-
     send_photo(message, data)
+    state.set_image_prompt(user_id, note)
     state.count_image(user_id)
     state.remember(user_id, note, "[Rasm yuborildi]")
 
@@ -417,6 +449,7 @@ def handle_image(message, file_id, caption):
         return
 
     state.set_image(message.from_user.id, data)
+    state.set_image_prompt(message.from_user.id, None)
     caption = (caption or "").strip()
 
     if caption and config.IMAGES_ENABLED and _EDIT_HINT.search(_norm(caption)):
@@ -473,6 +506,24 @@ def route_text(message, text):
     # classifier redirect a clear PPT request to ordinary chat.
     if is_presentation_request(normalized):
         do_file(message, text)
+        return
+
+    previous_image_prompt = (
+        state.get_image_prompt(user_id) if config.IMAGES_ENABLED else None
+    )
+    if (
+        last_image
+        and previous_image_prompt
+        and _IMAGE_CORRECTION.search(normalized)
+    ):
+        if not config.IMAGES_ENABLED:
+            reply(message, "Rasm yaratish xizmati hozir sozlanmagan.")
+        else:
+            do_draw(
+                message,
+                _refine_image_correction(previous_image_prompt, text),
+                text,
+            )
         return
 
     wants_image = looks_like_image_request(text, last_image is not None)

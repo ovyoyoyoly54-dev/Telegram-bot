@@ -29,6 +29,49 @@ def _sample_pptx(slide_count=12):
 
 
 class PresentationRoutingTests(unittest.TestCase):
+    def test_image_correction_regenerates_instead_of_answering_in_chat(self):
+        correction = "Sher emas, mushuk deb qaytib yozsam"
+        message = type("Message", (), {
+            "from_user": type("User", (), {"id": 42})(),
+            "chat": type("Chat", (), {"id": 42})(),
+            "message_id": 101,
+        })()
+
+        with (
+            patch.object(config, "IMAGES_ENABLED", True),
+            patch.object(bot.state, "get_image", return_value=b"last image"),
+            patch.object(bot.state, "get_image_prompt", return_value="Mushuk rasmini yarat"),
+            patch.object(docs, "get", return_value=None),
+            patch.object(bot, "_refine_image_correction", return_value="photo of a cat, not a lion"),
+            patch.object(bot, "do_draw") as draw,
+            patch.object(bot, "do_chat") as chat,
+        ):
+            bot.route_text(message, correction)
+
+        draw.assert_called_once_with(
+            message,
+            "photo of a cat, not a lion",
+            correction,
+        )
+        chat.assert_not_called()
+
+    def test_correction_subject_after_emas_overrides_rejected_subject(self):
+        captured = {}
+
+        def refine(text):
+            captured["text"] = text
+            return "A cat, not a lion"
+
+        with patch.object(bot.llm, "refine_prompt", side_effect=refine):
+            bot._refine_image_correction(
+                "Mushukni rasmini yarat",
+                "Sher emas, mushuk deb qaytib yozsam",
+            )
+
+        self.assertIn("rejected subject is sher", captured["text"])
+        self.assertIn("desired subject is mushuk", captured["text"])
+        self.assertIn("do not depict sher", captured["text"])
+
     def test_animal_photo_request_goes_to_image_generation_not_chat(self):
         request = "Mushukni rasmini qil"
         message = type("Message", (), {

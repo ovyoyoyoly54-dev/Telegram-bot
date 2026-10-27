@@ -59,6 +59,7 @@ _lock = threading.RLock()
 _history: OrderedDict = OrderedDict()
 _modes: OrderedDict = OrderedDict()
 _images: OrderedDict = OrderedDict()
+_image_prompts: OrderedDict = OrderedDict()
 _files: OrderedDict = OrderedDict()
 _decks: OrderedDict = OrderedDict()
 
@@ -181,6 +182,7 @@ def clear_history(uid: int) -> None:
     with _lock:
         _history.pop(uid, None)
         _images.pop(uid, None)
+        _image_prompts.pop(uid, None)
         _files.pop(uid, None)
         _decks.pop(uid, None)
         _recent.pop(uid, None)
@@ -213,6 +215,7 @@ def set_image(uid: int, data: bytes) -> None:
 
     with _lock:
         _put(_images, uid, data, config.IMAGE_CACHE)
+        _image_prompts.pop(uid, None)
         _put(_recent, uid, "image", USERS_CAP)
 
 
@@ -220,6 +223,21 @@ def get_image(uid: int) -> bytes | None:
     """Oxirgi rasmni qaytaradi."""
     with _lock:
         return _images.get(uid)
+
+
+def set_image_prompt(uid: int, prompt: str | None) -> None:
+    """Remember the latest generated image request for correction follow-ups."""
+    with _lock:
+        if prompt and str(prompt).strip():
+            _put(_image_prompts, uid, str(prompt).strip()[:1500], USERS_CAP)
+        else:
+            _image_prompts.pop(uid, None)
+
+
+def get_image_prompt(uid: int) -> str | None:
+    """Return the latest generated image request, if one is available."""
+    with _lock:
+        return _image_prompts.get(uid)
 
 
 # ============================================================
