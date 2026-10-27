@@ -1,5 +1,3 @@
-python
-"""
 AI Telegram Bot
 Imkoniyatlar:
 - AI bilan suhbat va suhbat tarixidan foydalanish
