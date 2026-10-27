@@ -397,13 +397,15 @@ def do_file(message, instruction):
         return
 
     bot.send_chat_action(message.chat.id, "upload_document")
-    allow_images = config.IMAGES_ENABLED and state.images_left(user_id) > 0
+    image_limit = state.images_left(user_id) if config.IMAGES_ENABLED else 0
+    allow_images = config.IMAGES_ENABLED and image_limit > 0
 
     result = docs.generate(
         state.get_history(user_id),
         instruction,
         docs.get(user_id),
         allow_images=allow_images,
+        image_limit=image_limit,
     )
 
     for _ in range(getattr(result, "images_added", 0)):

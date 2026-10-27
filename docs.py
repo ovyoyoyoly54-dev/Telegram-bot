@@ -150,6 +150,7 @@ def generate(
     instruction: str,
     doc: dict | None = None,
     allow_images: bool = True,
+    image_limit: int | None = None,
 ) -> GenerateResult:
     """Taqdimot yoki oddiy fayl yaratadi."""
     instruction = (instruction or "").strip()
@@ -186,7 +187,7 @@ def generate(
                     "Presenton failed; using internal presentation generator (%s)",
                     type(exc).__name__,
                 )
-        return _generate_deck(history, instruction, doc, allow_images)
+        return _generate_deck(history, instruction, doc, allow_images, image_limit)
 
     return _generate_file(history, instruction, doc)
 
@@ -293,7 +294,10 @@ QO'SHIMCHA MAZMUN TALABLARI:
 - Bir xil fikrni turli slaydlarda takrorlama.
 - Slaydlar ketma-ketligi kirish, asosiy qism va xulosadan iborat bo'lsin.
 - Har bir oddiy slaydga odatda 3-5 ta mazmunli bullet yoz.
-- Har bir bullet faqat bitta kalit so'z emas, tushunarli izoh bo'lsin.
+- Har bir bullet fikrni sodda tilda tushuntiradigan to'liq gap bo'lsin; faqat kalit so'z yozma.
+- Kamida ikki xil aniq misol, ularning izohi va mavzuga aloqasini ko'rsat.
+- Birinchi slayd muqova, oxirgi slayd xulosa bo'lsin; boshqa slaydlarda faqat sarlavha qoldirma.
+- Slaydlarning vizual turi va kompozitsiyasini navbat bilan almashtir.
 - Haqiqiy bo'lmagan statistika yoki manbalarni o'ylab topma.
 - JSON maydonlarini deck.py qo'llaydigan formatda qaytar.
 """
@@ -309,6 +313,7 @@ def _generate_deck(
     instruction: str,
     doc: dict | None,
     allow_images: bool,
+    image_limit: int | None = None,
 ) -> GenerateResult:
     """Bir nechta AI natijasini sinab, yaroqli taqdimotni tanlaydi."""
     # Asosiy provayderdan boshlab zaxira provayderlarni tanlaymiz.
@@ -443,6 +448,25 @@ def _generate_deck(
 
     if allow_images and config.IMAGES_ENABLED:
         prompts = deck_mod.image_prompts(best_deck)
+        if image_limit is None:
+            image_limit = (
+                len(prompts)
+                if config.IMAGE_DAILY_LIMIT <= 0
+                else config.IMAGE_DAILY_LIMIT
+            )
+        image_limit = min(len(prompts), max(0, int(image_limit)))
+        if image_limit < len(prompts):
+            if image_limit == 1:
+                prompts = [prompts[len(prompts) // 2]]
+            elif image_limit > 1:
+                last_index = len(prompts) - 1
+                indices = [
+                    round(index * last_index / (image_limit - 1))
+                    for index in range(image_limit)
+                ]
+                prompts = [prompts[index] for index in indices]
+            else:
+                prompts = []
 
         for prompt in prompts:
             try:

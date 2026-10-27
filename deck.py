@@ -195,14 +195,24 @@ def normalize(d) -> dict:
             f"Taqdimot juda qisqa ({len(slides)} slayd). "
             f"Kamida {MIN_SLIDES} ta kerak. Qayta urinib ko'ring."
         )
-    # Har bir slaydda image_prompt bo'lishini kafolatlash
-    for s in slides:
+    # Har bir mazmunli matnli slaydni rasmli layoutga o'tkazamiz. Rasm API
+    # ishlamasa ham build_pptx shu layoutni xilma-xil matn ko'rinishida chizadi.
+    for index, s in enumerate(slides):
+        if s.get("layout") == "title" and not s.get("subtitle"):
+            s["subtitle"] = "Mavzuga kirish va taqdimotning asosiy maqsadi"
+        elif s.get("layout") == "section" and not s.get("subtitle"):
+            s["subtitle"] = "Bo'limning asosiy tushunchalari, izohlari va amaliy misollari"
+        elif s.get("layout") == "closing" and not s.get("subtitle"):
+            s["subtitle"] = "Asosiy fikrlar, amaliy xulosa va eslab qolish kerak bo'lgan jihatlar"
         if not s.get("image_prompt"):
             title = s.get("title") or s.get("quote", "")[:40] or "presentation"
             s["image_prompt"] = (
-                f"Professional high-quality illustration about {title}, "
-                f"modern style, cinematic lighting, detailed, 16:9"
+                f"Create a clear, high-quality editorial visual for slide {index + 1} "
+                f"about {title}. Make this scene and camera composition distinct "
+                "from other slides in the same deck; modern, detailed, 16:9."
             )
+        if s.get("layout") == "bullets":
+            s["layout"] = "image_text"
     theme = str(d.get("theme") or DEFAULT_THEME).strip().lower()
     return {
         "title": _s(d.get("title") or slides[0].get("title"), 90) or "Taqdimot",
@@ -244,6 +254,8 @@ def outline(deck: dict) -> str:
 def image_prompts(deck: dict) -> list[str]:
     seen, out = set(), []
     for s in deck["slides"]:
+        if s.get("layout") not in ("title", "image_text", "closing"):
+            continue
         p = s.get("image_prompt")
         if p and p not in seen:
             seen.add(p)
@@ -518,9 +530,36 @@ def _slide_section(slide, th, s, num, idx):
         text(slide, MX + 0.1, 6.1, 10.5, 0.8, sub, 20, th["hero_sub"])
 
 
-def _slide_bullets(slide, th, s):
+def _slide_bullets(slide, th, s, variant=0):
     items = s.get("bullets", [])
     if not items:
+        return
+    if variant == 1:
+        row_h = 4.7 / len(items)
+        for index, item in enumerate(items):
+            y = 2.05 + index * row_h
+            if index % 2 == 0:
+                rrect(slide, MX, y, CW, row_h - 0.1, th["card"], line=th["line"])
+            oval(slide, MX + 0.2, y + (row_h - 0.46) / 2, 0.46, 0.46, th["accent"])
+            text(slide, MX + 0.2, y + (row_h - 0.46) / 2, 0.46, 0.46,
+                 str(index + 1), 16, th["on_accent"], bold=True,
+                 align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            head, body = _split_head(item)
+            paras = [[(head + ": ", True, None), (body, False, None)]] if head else [item]
+            size = fit([item], CW - 1.1, row_h - 0.16, 21, 12)
+            text(slide, MX + 0.9, y + 0.04, CW - 1.1, row_h - 0.16,
+                 paras, size, th["text"], anchor=MSO_ANCHOR.MIDDLE)
+        return
+    if variant == 2 and len(items) > 1:
+        hero_w = min(4.2, CW * 0.4)
+        rrect(slide, MX, 2.05, hero_w, 4.7, th["accent"], radius=0.06)
+        head, body = _split_head(items[0])
+        lead = f"{head}: {body}" if head else items[0]
+        lead_size = fit([lead], hero_w - 0.55, 4.0, 30, 16, bold=True)
+        text(slide, MX + 0.28, 2.35, hero_w - 0.55, 4.0, lead,
+             lead_size, th["on_accent"], bold=True, anchor=MSO_ANCHOR.MIDDLE)
+        _dots(slide, th, items[1:], MX + hero_w + 0.35, 2.15,
+              CW - hero_w - 0.45, 4.5, 21)
         return
     n = len(items)
     cols = 1 if n <= 3 else 2
@@ -550,7 +589,7 @@ def _slide_bullets(slide, th, s):
              space_after=2)
 
 
-def _slide_image_text(slide, th, s, img):
+def _slide_image_text(slide, th, s, img, variant=0):
     px = 7.95
     bullets = s.get("bullets", [])
     if img and bullets and _picture(slide, img, px, 0, W - px, H):
@@ -559,10 +598,38 @@ def _slide_image_text(slide, th, s, img):
         title = s.get("title", "Slayd")
         size = fit([title], px - MX - 0.6, 1.5, 34, 22, bold=True, lh=1.12)
         text(slide, MX, 0.82, px - MX - 0.6, 1.5, title, size, th["text"], bold=True)
-        _dots(slide, th, bullets, MX, 2.5, px - MX - 0.7, 4.2, 22)
+        content_w = px - MX - 0.7
+        if variant == 1:
+            gap = 0.12
+            row_h = 4.1 / max(1, len(bullets))
+            for index, item in enumerate(bullets):
+                y = 2.5 + index * row_h
+                if index % 2 == 0:
+                    rrect(slide, MX, y, content_w, row_h - gap, th["card"], line=th["line"])
+                text(slide, MX + 0.12, y + 0.04, 0.42, row_h - gap - 0.08,
+                     f"{index + 1:02d}", 14, th["accent"], bold=True,
+                     anchor=MSO_ANCHOR.MIDDLE)
+                head, body = _split_head(item)
+                paras = [[(head + ": ", True, None), (body, False, None)]] if head else [item]
+                size = fit([item], content_w - 0.8, row_h - gap - 0.08, 19, 11)
+                text(slide, MX + 0.62, y + 0.04, content_w - 0.8,
+                     row_h - gap - 0.08, paras, size, th["text"],
+                     anchor=MSO_ANCHOR.MIDDLE)
+        elif variant == 2 and len(bullets) > 1:
+            hero_w = content_w * 0.43
+            rrect(slide, MX, 2.5, hero_w, 4.1, th["accent"], radius=0.06)
+            head, body = _split_head(bullets[0])
+            lead = f"{head}: {body}" if head else bullets[0]
+            lead_size = fit([lead], hero_w - 0.55, 3.5, 28, 15, bold=True)
+            text(slide, MX + 0.28, 2.8, hero_w - 0.55, 3.5, lead,
+                 lead_size, th["on_accent"], bold=True, anchor=MSO_ANCHOR.MIDDLE)
+            _dots(slide, th, bullets[1:], MX + hero_w + 0.2, 2.55,
+                  content_w - hero_w - 0.2, 4.0, 19)
+        else:
+            _dots(slide, th, bullets, MX, 2.5, content_w, 4.2, 22)
     else:
         _header(slide, th, s.get("title", "Slayd"))
-        _slide_bullets(slide, th, s)
+        _slide_bullets(slide, th, s, variant)
 
 
 def _slide_two_column(slide, th, s):
@@ -753,28 +820,53 @@ def build_pptx(deck: dict, images: dict | None = None) -> bytes:
     prs.slide_width, prs.slide_height = Inches(W), Inches(H)
     blank = prs.slide_layouts[6]
     sec_idx = 0
+    dark_accents = [
+        "38BDF8", "FB7185", "A78BFA", "34D399", "FBBF24", "22D3EE",
+        "F472B6", "4ADE80", "C084FC", "60A5FA", "2DD4BF", "F87171",
+        "A3E635", "E879F9", "818CF8", "10B981", "FDA4AF", "93C5FD",
+        "D8B4FE", "5EEAD4",
+    ]
+    light_accents = [
+        "0369A1", "BE123C", "6D28D9", "047857", "B45309", "0F766E",
+        "9D174D", "166534", "7E22CE", "1D4ED8", "115E59", "B91C1C",
+        "3F6212", "A21CAF", "4338CA", "065F46", "9F1239", "1E40AF",
+        "6B21A8", "134E4A",
+    ]
+    hero_pairs = [("0B1220", "1E3A5F"), ("2A1B3D", "5B2146"),
+                  ("102A43", "14532D"), ("1E1B4B", "3B1D6A")]
     for num, s in enumerate(deck.get("slides", []), 1):
         slide = prs.slides.add_slide(blank)
         lay = s.get("layout", "bullets")
         img = images.get(s.get("image_prompt", ""))
+        slide_theme = th.copy()
+        accent_palette = dark_accents if th["dark"] else light_accents
+        accent_i = (num - 1) % len(accent_palette)
+        slide_theme["accent"] = accent_palette[accent_i]
+        slide_theme["accent2"] = accent_palette[(accent_i + 7) % len(accent_palette)]
+        slide_theme["bg"] = th["bg"] if num % 2 else th["bg2"]
+        slide_theme["bg2"] = th["bg2"] if num % 2 else th["bg"]
+        slide_theme["hero1"], slide_theme["hero2"] = hero_pairs[(num - 1) % len(hero_pairs)]
+        variant = (num - 1) % 3
         try:
             if lay in ("title", "closing"):
-                _slide_title(slide, th, s, img, deck.get("title", "Taqdimot"), num, closing=(lay == "closing"))
+                _slide_title(slide, slide_theme, s, img, deck.get("title", "Taqdimot"), num, closing=(lay == "closing"))
             elif lay == "section":
                 sec_idx += 1
-                _slide_section(slide, th, s, num, sec_idx)
+                _slide_section(slide, slide_theme, s, num, sec_idx)
             else:
-                _solid_bg(slide, th["bg"])
+                _solid_bg(slide, slide_theme["bg"])
                 if lay == "quote":
-                    _slide_quote(slide, th, s)
+                    _slide_quote(slide, slide_theme, s)
                 elif lay == "image_text":
-                    _slide_image_text(slide, th, s, img)
+                    _slide_image_text(slide, slide_theme, s, img, variant)
+                elif lay == "bullets":
+                    _slide_bullets(slide, slide_theme, s, variant)
                 else:
-                    _header(slide, th, s.get("title", "Slayd"))
+                    _header(slide, slide_theme, s.get("title", "Slayd"))
                     {"bullets": _slide_bullets, "two_column": _slide_two_column, "stats": _slide_stats,
-                     "steps": _slide_steps, "table": _slide_table, "chart": _slide_chart}[lay](slide, th, s)
+                     "steps": _slide_steps, "table": _slide_table, "chart": _slide_chart}[lay](slide, slide_theme, s)
                 if not (lay == "image_text" and img):
-                    _footer(slide, th, deck.get("title", "Taqdimot"), num)
+                    _footer(slide, slide_theme, deck.get("title", "Taqdimot"), num)
         except Exception as exc:  # noqa: BLE001
             import logging
             logging.getLogger(__name__).warning("Slayd %s xatosi: %s", num, exc, exc_info=True)

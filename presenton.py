@@ -39,10 +39,14 @@ def generate_presentation(
     export_as = "pptx"
     detailed_content = (
         f"Foydalanuvchi mavzusi: {prompt}\n\n"
-        "Shu mavzuni batafsil va tushunarli yoritadigan taqdimot yarating. "
-        "Muhim tushunchalarni izohlang, mavzuni mantiqiy bo'limlarga ajrating, "
-        "har bir asosiy fikrni tushuntiring va mos, aniq misollar keltiring. "
-        "Kirish, asosiy qism va xulosa bo'lsin. Mavzuga aloqasiz yoki "
+        "Shu mavzuni boshidan oxirigacha batafsil va tushunarli yoritadigan "
+        "taqdimot yarating. Kirish, mantiqiy ketma-ketlikdagi asosiy bo'limlar "
+        "va aniq xulosani kiriting. Har bir mazmuniy slaydda sarlavhadan tashqari "
+        "tushuntirish, sabab-oqibat yoki amaliy qo'llanish bo'lsin. Kamida ikki "
+        "konkret misol keltirib, nima uchun ular mavzuga mosligini izohlang. "
+        "Slaydlar faqat sarlavha yoki bezak rasmlar bilan cheklanmasin. "
+        "Har bir slaydga mavzuga xos, turli kompozitsiyali sifatli tasvir qo'shing; "
+        "takroriy fon va bir xil sahna ishlatmang. Mavzuga aloqasiz yoki "
         "tekshirilmagan faktlarni qo'shmang."
     )
 
