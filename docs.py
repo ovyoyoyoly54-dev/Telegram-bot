@@ -296,6 +296,9 @@ QO'SHIMCHA MAZMUN TALABLARI:
 - Har bir oddiy slaydga odatda 3-5 ta mazmunli bullet yoz.
 - Har bir bullet fikrni sodda tilda tushuntiradigan to'liq gap bo'lsin; faqat kalit so'z yozma.
 - Kamida ikki xil aniq misol, ularning izohi va mavzuga aloqasini ko'rsat.
+- O'zbekcha tabiiy va grammatik jihatdan to'g'ri yoz; ega-kesim va qo'shimchalarni moslashtir.
+- Bir atama uchun butun taqdimot davomida bir xil nom ishlat; fikrlar va terminlar o'zaro zid bo'lmasin.
+- Har bir gapni qayta o'qib, kelishik, imlo, mazmuniy bog'lanish va takrorlarni tekshir.
 - Birinchi slayd muqova, oxirgi slayd xulosa bo'lsin; boshqa slaydlarda faqat sarlavha qoldirma.
 - Slaydlarning vizual turi va kompozitsiyasini navbat bilan almashtir.
 - Haqiqiy bo'lmagan statistika yoki manbalarni o'ylab topma.

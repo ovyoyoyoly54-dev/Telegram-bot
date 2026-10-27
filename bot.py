@@ -62,6 +62,25 @@ _DRAW_HINT = re.compile(
     r"generate image|create an image|draw|logo yarat)\b",
     re.I,
 )
+_IMAGE_OBJECT = re.compile(
+    r"\b(rasm\w*|surat\w*|foto\w*|image\w*|picture\w*|photo\w*|"
+    r"\u0444\u043e\u0442\u043e\w*|\u043a\u0430\u0440\u0442\u0438\u043d\w*|"
+    r"\u0438\u0437\u043e\u0431\u0440\u0430\u0436\w*)\b",
+    re.I,
+)
+_IMAGE_ACTION = re.compile(
+    r"(qil\w*|chiz\w*|yarat\w*|yasab\s*ber|ber\w*|yubor\w*|"
+    r"tashla\w*|ko'rsat\w*|kerak|xohlayman|istayman|"
+    r"create|draw|make|generate|send|show|want|need|"
+    r"\u0441\u0434\u0435\u043b\w*|\u0441\u043e\u0437\u0434\w*|"
+    r"\u043d\u0430\u0440\u0438\u0441\w*|\u0441\u0433\u0435\u043d\u0435\u0440\w*|"
+    r"\u043f\u0440\u0438\u0448\u043b\w*|\u043f\u043e\u043a\u0430\u0436\w*|\u0445\u043e\u0447\w*)",
+    re.I,
+)
+_IMAGE_HOWTO = re.compile(
+    r"\b(how\s+(?:do\s+i|to)|qanday\s+qilib|\u043a\u0430\u043a\s+(?:\u043c\u043d\u0435|\u043c\u043e\u0436\u043d\u043e))\b",
+    re.I,
+)
 _EDIT_HINT = re.compile(
     r"\b(tahrir|fonini|fonni|rangini|o'zgartir|"
     r"ozgartir|almashtir|olib tashla|qo'shib ber|edit image)\b",
@@ -113,7 +132,30 @@ _REALTIME_HINT = re.compile(
 
 def looks_like_image_request(text, has_image=False):
     text = _norm(text)
-    return bool(_DRAW_HINT.search(text) or (has_image and _EDIT_HINT.search(text)))
+    explicit_creation = bool(
+        (_DRAW_HINT.search(text) or (_IMAGE_OBJECT.search(text) and _IMAGE_ACTION.search(text)))
+        and not _IMAGE_HOWTO.search(text)
+    )
+    return bool(explicit_creation or (has_image and _EDIT_HINT.search(text)))
+
+
+_EXPLICIT_ART_STYLE = re.compile(
+    r"\b(illustration|cartoon|anime|watercolor|painting|sketch|vector|logo|icon|"
+    r"chizilgan|multfilm|animatsion|akvarel|illyustratsiya)\b",
+    re.I,
+)
+
+
+def _refine_image_prompt(text):
+    """Prefer a lifelike photo unless the user explicitly asks for art/design."""
+    prompt = llm.refine_prompt(text) or str(text or "").strip()
+    if not _EXPLICIT_ART_STYLE.search(text or ""):
+        prompt += (
+            ". Photorealistic real-life photograph, natural anatomy and textures, "
+            "realistic environment and lighting. No text, captions, watermark, "
+            "ASCII art, or illustration."
+        )
+    return prompt[:1800]
 
 
 def is_presentation_request(text):
@@ -433,11 +475,21 @@ def route_text(message, text):
         do_file(message, text)
         return
 
-    wants_image = config.IMAGES_ENABLED and looks_like_image_request(text, last_image is not None)
+    wants_image = looks_like_image_request(text, last_image is not None)
+    if wants_image:
+        if not config.IMAGES_ENABLED:
+            reply(message, "Rasm yaratish xizmati hozir sozlanmagan.")
+            return
+        if last_image and _EDIT_HINT.search(normalized):
+            do_edit(message, last_image, llm.refine_prompt(text), text)
+        else:
+            do_draw(message, _refine_image_prompt(text), text)
+        return
+
     wants_file = bool(_FILE_HINT.search(normalized) or (uploaded_doc and _DOCEDIT_HINT.search(normalized)))
 
     action, prompt = "chat", ""
-    if wants_image or wants_file:
+    if wants_file:
         try:
             action, prompt = llm.classify_vote(text, last_image is not None, uploaded_doc is not None)
         except Exception:
@@ -450,7 +502,7 @@ def route_text(message, text):
     if action == "chat" and last_image and _IMAGE_FOLLOWUP_HINT.search(normalized) and not wants_file:
         do_chat(message, text, image=last_image)
     elif action == "draw" and config.IMAGES_ENABLED:
-        do_draw(message, llm.refine_prompt(prompt or text), text)
+        do_draw(message, _refine_image_prompt(prompt or text), text)
     elif action == "edit" and config.IMAGES_ENABLED:
         do_edit(message, last_image, llm.refine_prompt(prompt or text), text)
     elif action == "file":
@@ -502,7 +554,7 @@ def cmd_draw(message):
     if not prompt:
         reply(message, "Tavsif yozing:\n/rasm quyosh botayotgan dengiz")
         return
-    do_draw(message, llm.refine_prompt(prompt), prompt)
+    do_draw(message, _refine_image_prompt(prompt), prompt)
 
 
 @bot.message_handler(commands=["tahrir"], chat_types=["private"])

@@ -29,6 +29,29 @@ def _sample_pptx(slide_count=12):
 
 
 class PresentationRoutingTests(unittest.TestCase):
+    def test_animal_photo_request_goes_to_image_generation_not_chat(self):
+        request = "Mushukni rasmini qil"
+        message = type("Message", (), {
+            "from_user": type("User", (), {"id": 42})(),
+            "chat": type("Chat", (), {"id": 42})(),
+            "message_id": 100,
+        })()
+
+        with (
+            patch.object(config, "IMAGES_ENABLED", True),
+            patch.object(bot.state, "get_image", return_value=None),
+            patch.object(docs, "get", return_value=None),
+            patch.object(bot, "_refine_image_prompt", return_value="photorealistic cat"),
+            patch.object(bot, "do_draw") as draw,
+            patch.object(bot, "do_chat") as chat,
+            patch.object(bot.llm, "classify_vote") as classify,
+        ):
+            bot.route_text(message, request)
+
+        draw.assert_called_once_with(message, "photorealistic cat", request)
+        chat.assert_not_called()
+        classify.assert_not_called()
+
     def test_uzbek_12_slide_request_generates_and_sends_real_pptx(self):
         request = "Menga sun\u2019iy intellekt haqida 12 slaydli prezentatsiya qilib ber"
         pptx_bytes = _sample_pptx(12)
@@ -106,6 +129,27 @@ class PresentationRoutingTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertTrue(bot.is_presentation_request(text))
+
+    def test_animal_photo_requests_are_recognized_in_three_languages(self):
+        for text in (
+            "Mushukni rasmini qil",
+            "Itning real hayotdagi rasmini yubor",
+            "\u041f\u0440\u0438\u0448\u043b\u0438 \u0444\u043e\u0442\u043e \u043a\u043e\u0448\u043a\u0438",
+            "Send me a real photo of a cat",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(bot.looks_like_image_request(text))
+
+    def test_default_image_prompt_requests_a_lifelike_photo(self):
+        with patch.object(bot.llm, "refine_prompt", return_value="A cat in a garden"):
+            prompt = bot._refine_image_prompt("Mushukni rasmini qil")
+        self.assertIn("Photorealistic real-life photograph", prompt)
+        self.assertIn("No text", prompt)
+
+    def test_explicit_art_style_is_preserved(self):
+        with patch.object(bot.llm, "refine_prompt", return_value="A cartoon cat"):
+            prompt = bot._refine_image_prompt("Multfilm uslubida mushuk rasmi qil")
+        self.assertNotIn("Photorealistic real-life photograph", prompt)
 
 
 if __name__ == "__main__":
