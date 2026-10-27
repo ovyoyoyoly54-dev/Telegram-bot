@@ -1,17 +1,17 @@
-"""Telegram bot sozlamalari.
 
-Barcha qiymatlar .env fayli yoki Environment Variables orqali o'rnatiladi.
-Agar biror qiymat berilmasa — default ishlatiladi.
+"""Telegram bot konfiguratsiyasi.
+
+Qiymatlar .env yoki hosting Environment Variables orqali olinadi.
+Maxfiy API kalitlarini kodga yozmang va GitHub'ga joylamang.
 """
 import os
-
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 # ================================================================
-# Yordamchi funksiyalar
+# YORDAMCHI FUNKSIYALAR
 # ================================================================
 
 def _get(name: str, default: str = "") -> str:
@@ -44,6 +44,7 @@ def _required(name: str) -> str:
 def _id_set(name: str) -> set[int]:
     result = set()
     raw = _get(name)
+
     for item in raw.replace(";", ",").split(","):
         item = item.strip()
         if not item:
@@ -51,45 +52,74 @@ def _id_set(name: str) -> set[int]:
         if not item.lstrip("-").isdigit():
             raise SystemExit(f"❌ {name} noto'g'ri: {item}")
         result.add(int(item))
+
     return result
 
 
 # ================================================================
-# Majburiy API kalitlari
+# TELEGRAM VA ASOSIY API
 # ================================================================
 
 TELEGRAM_TOKEN = _required("TELEGRAM_TOKEN")
-GROQ_API_KEY = _required("GROQ_API_KEY")
+
+# Hozirgi llm.py asosiy provayder sifatida Groqni kutadi.
+GROQ_API_KEY = _get("GROQ_API_KEY")
 
 
 # ================================================================
-# AI provayderlari
+# BRAVE SEARCH — INTERNETDAN QIDIRISH
 # ================================================================
 
-# Gemini (zaxira)
+BRAVE_API_KEY = _get("BRAVE_API_KEY")
+
+# Brave API natijalarining hududi va tili.
+# Country: US, GB, DE, FR va boshqa Brave qo'llaydigan kodlar.
+BRAVE_SEARCH_COUNTRY = _get("BRAVE_SEARCH_COUNTRY", "US").upper()
+BRAVE_SEARCH_LANG = _get("BRAVE_SEARCH_LANG", "en").lower()
+
+# Natijalar soni: 1–10.
+BRAVE_SEARCH_COUNT = max(1, min(_int("BRAVE_SEARCH_COUNT", 5), 10))
+
+# Qidiruv timeout: 5–30 soniya.
+BRAVE_SEARCH_TIMEOUT = max(
+    5,
+    min(_int("BRAVE_SEARCH_TIMEOUT", 12), 30),
+)
+
+BRAVE_SEARCH_ENABLED = bool(BRAVE_API_KEY)
+
+
+# ================================================================
+# GEMINI
+# ================================================================
+
 GEMINI_API_KEY = _get("GEMINI_API_KEY")
 GEMINI_MODEL = _get("GEMINI_MODEL", "gemini-2.5-flash")
 
 
-# OpenRouter — ikkita API kaliti
+# ================================================================
+# OPENROUTER — KALITLAR VA MODELLAR
+# ================================================================
+
 OPENROUTER_API_KEY_1 = _get("OPENROUTER_API_KEY_1")
 OPENROUTER_API_KEY_2 = _get("OPENROUTER_API_KEY_2")
+OPENROUTER_API_KEY_LEGACY = _get("OPENROUTER_API_KEY")
 
-# Eski nom bilan saqlangan kalit bo'lsa, uni ham qo'llab-quvvatlash
-OPENROUTER_API_KEY = (
-    OPENROUTER_API_KEY_1
-    or _get("OPENROUTER_API_KEY")
-    or OPENROUTER_API_KEY_2
-)
-
+# Eski va yangi environment nomlari bilan moslik.
 OPENROUTER_API_KEYS = list(dict.fromkeys(
     key for key in (
         OPENROUTER_API_KEY_1,
         OPENROUTER_API_KEY_2,
-        _get("OPENROUTER_API_KEY"),
+        OPENROUTER_API_KEY_LEGACY,
     )
     if key
 ))
+
+OPENROUTER_API_KEY = (
+    OPENROUTER_API_KEY_1
+    or OPENROUTER_API_KEY_LEGACY
+    or OPENROUTER_API_KEY_2
+)
 
 OPENROUTER_MODEL = _get("OPENROUTER_MODEL", "openrouter/free")
 OPENROUTER_VISION_MODEL = (
@@ -97,26 +127,46 @@ OPENROUTER_VISION_MODEL = (
 )
 
 
+# ================================================================
+# AI PROVAYDERLARI
+# ================================================================
+
 PROVIDERS = ("groq", "openrouter", "gemini")
 
-# Asosiy provayderlar (fallback zanjiri shu tartibda ishlaydi)
 CHAT_PROVIDER = _get("CHAT_PROVIDER", "groq").lower()
-FILE_PROVIDER = _get("FILE_PROVIDER", "openrouter" if OPENROUTER_API_KEY else "groq").lower()
+FILE_PROVIDER = _get(
+    "FILE_PROVIDER",
+    "openrouter" if OPENROUTER_API_KEY else "groq",
+).lower()
 
-# Tekshirish: provayder nomi to'g'rimi va API kaliti mavjudmi
-for _name, _value in (("CHAT_PROVIDER", CHAT_PROVIDER), ("FILE_PROVIDER", FILE_PROVIDER)):
+for _name, _value in (
+    ("CHAT_PROVIDER", CHAT_PROVIDER),
+    ("FILE_PROVIDER", FILE_PROVIDER),
+):
     if _value not in PROVIDERS:
-        raise SystemExit(f"❌ {_name} noto'g'ri. Qiymat: groq, openrouter yoki gemini.")
+        raise SystemExit(
+            f"❌ {_name} noto'g'ri. "
+            "Qiymat groq, openrouter yoki gemini bo'lishi mumkin."
+        )
+
     if _value == "groq" and not GROQ_API_KEY:
-        raise SystemExit(f"❌ {_name}=groq, lekin GROQ_API_KEY topilmadi.")
+        raise SystemExit(
+            f"❌ {_name}=groq, lekin GROQ_API_KEY sozlanmagan."
+        )
+
     if _value == "openrouter" and not OPENROUTER_API_KEY:
-        raise SystemExit(f"❌ {_name}=openrouter, lekin OPENROUTER_API_KEY topilmadi.")
+        raise SystemExit(
+            f"❌ {_name}=openrouter, lekin OpenRouter kaliti sozlanmagan."
+        )
+
     if _value == "gemini" and not GEMINI_API_KEY:
-        raise SystemExit(f"❌ {_name}=gemini, lekin GEMINI_API_KEY topilmadi.")
+        raise SystemExit(
+            f"❌ {_name}=gemini, lekin GEMINI_API_KEY sozlanmagan."
+        )
 
 
 # ================================================================
-# Cloudflare (rasm yaratish/tahrirlash)
+# CLOUDFLARE — RASM YARATISH VA TAHRIRLASH
 # ================================================================
 
 CF_ACCOUNT_ID = _get("CF_ACCOUNT_ID")
@@ -127,6 +177,7 @@ IMAGE_MODEL = _get(
     "IMAGE_MODEL",
     "@cf/black-forest-labs/flux-1-schnell",
 )
+
 EDIT_MODEL = _get(
     "EDIT_MODEL",
     "@cf/black-forest-labs/flux-2-klein-4b",
@@ -134,118 +185,112 @@ EDIT_MODEL = _get(
 
 
 # ================================================================
-# Groq modellari
+# GROQ MODELLARI
 # ================================================================
 
 CHAT_MODEL = _get("CHAT_MODEL", "openai/gpt-oss-120b")
 VISION_MODEL = _get("VISION_MODEL", "qwen/qwen3.8-27b")
 CLASSIFIER_MODEL = _get("CLASSIFIER_MODEL", "openai/gpt-oss-20b")
+
 STT_MODEL = _get("STT_MODEL", "whisper-large-v3-turbo")
-STT_LANGUAGE = _get("STT_LANGUAGE") or None  # bo'sh bo'lsa None (avto-aniqlash)
-REASONING_EFFORT = _get("REASONING_EFFORT", "low")  # low | medium | high
+STT_LANGUAGE = _get("STT_LANGUAGE") or None
+
+REASONING_EFFORT = _get("REASONING_EFFORT", "low")
+if REASONING_EFFORT not in ("low", "medium", "high"):
+    REASONING_EFFORT = "low"
 
 
 # ================================================================
-# Token limitlari
+# TOKEN LIMITLARI
 # ================================================================
 
-# Oddiy suhbat uchun (yuqori chegara 16384)
-CHAT_MAX_TOKENS = max(128, min(_int("CHAT_MAX_TOKENS", 8192), 16384))
+CHAT_MAX_TOKENS = max(
+    128,
+    min(_int("CHAT_MAX_TOKENS", 8192), 16384),
+)
 
-# Taqdimot / fayl yaratish uchun (8 slaydli JSON sig'ishi shart)
-PRESENTATION_MAX_TOKENS = max(4096, min(_int("PRESENTATION_MAX_TOKENS", 8192), 16384))
+PRESENTATION_MAX_TOKENS = max(
+    4096,
+    min(_int("PRESENTATION_MAX_TOKENS", 8192), 16384),
+)
 
 
 # ================================================================
-# Ruxsatlar va limitlar
+# RUXSATLAR VA KUNLIK LIMITLAR
 # ================================================================
 
-# Bo'sh bo'lsa — hamma uchun ochiq; to'ldirilsa — faqat shu ID'lar
+# Bo'sh bo'lsa, bot.py boshqacha cheklamagan taqdirda hamma foydalanuvchi
+# foydalanishi mumkin. ID'lar vergul bilan ajratiladi.
 ALLOWED_USERS = _id_set("ALLOWED_USERS")
 
-# Kunlik limitlar (0 = cheksiz)
 IMAGE_DAILY_LIMIT = max(0, _int("IMAGE_DAILY_LIMIT", 5))
 FILE_DAILY_LIMIT = max(0, _int("FILE_DAILY_LIMIT", 10))
-
-# Tezlik limiti (soniya)
 RATE_LIMIT_SECONDS = max(0.0, _float("RATE_LIMIT_SECONDS", 3.0))
-
-# Ovozli xabar maksimal davomiyligi (soniya)
 VOICE_MAX_SECONDS = max(1, _int("VOICE_MAX_SECONDS", 120))
 
 
 # ================================================================
-# Xotira (suhbat tarixi)
+# SUHBAT XOTIRASI
 # ================================================================
 
-# Nechta xabar eslab qolinadi (juft bo'lishi shart: user+assistant)
 HISTORY_LIMIT = max(2, _int("HISTORY_LIMIT", 10))
-HISTORY_LIMIT -= HISTORY_LIMIT % 2  # toq bo'lsa, juftga keltirish
+HISTORY_LIMIT -= HISTORY_LIMIT % 2
 
-# Bitta xabar maksimal uzunligi (belgi)
 HISTORY_MSG_CHARS = max(100, _int("HISTORY_MSG_CHARS", 1500))
 
 
 # ================================================================
-# Keshlar (state.py ishlatadi)
+# KESHLAR
 # ================================================================
 
-# Nechta foydalanuvchining oxirgi rasmi saqlanadi
 IMAGE_CACHE = max(1, _int("IMAGE_CACHE", 100))
-
-# Nechta foydalanuvchining yuklangan fayli saqlanadi
 FILE_CACHE = max(1, _int("FILE_CACHE", 500))
-
-# Nechta foydalanuvchining taqdimoti saqlanadi
 DECK_CACHE = max(1, _int("DECK_CACHE", 100))
 
 
 # ================================================================
-# Fayl limitlari (docs.py va files.py ishlatadi)
+# FAYL LIMITLARI
 # ================================================================
 
-# Yuklanadigan fayl maksimal hajmi (bayt). Default: 20 MB
 FILE_MAX_BYTES = max(
     1024 * 1024,
     _int("FILE_MAX_BYTES", 20 * 1024 * 1024),
 )
 
-# Fayldan o'qiladigan matn maksimal uzunligi (belgi). Default: 20 000
 FILE_MAX_CHARS = max(
     1000,
     _int("FILE_MAX_CHARS", 20000),
 )
 
-# Excel faylida maksimal qatorlar soni (juda katta jadvalni cheklash uchun)
 XLSX_MAX_ROWS = max(100, _int("XLSX_MAX_ROWS", 5000))
 
 
 # ================================================================
-# Taqdimot best-of-N (docs.py ishlatadi)
+# TAQDIMOT SIFATI
 # ================================================================
 
-# Taqdimot yaratishda nechta modeldan sinab, eng yaxshisini tanlash.
-# 1 = oddiy llm.chat (tez, arzon)
-# 2 = 2 ta model (tavsiya etiladi)
-# 3 = 3 ta model (sekinroq, qimmatroq, lekin eng sifatli)
+# 1 = bitta model, 2 = ikki model, 3 = uch model.
+# Ko'p model ishlatish API sarfini va javob vaqtini oshirishi mumkin.
 BEST_OF_N = max(1, min(_int("BEST_OF_N", 2), 3))
 
 
 # ================================================================
-# Texnik sozlamalar
+# TEXNIK SOZLAMALAR
 # ================================================================
 
-# Telegram bot workerlari soni (1-32)
 WORKERS = max(1, min(_int("WORKERS", 8), 32))
 
-# Umumiy HTTP so'rov timeout (soniya). 5-300
-REQUEST_TIMEOUT = max(5, min(_int("REQUEST_TIMEOUT", 60), 300))
+REQUEST_TIMEOUT = max(
+    5,
+    min(_int("REQUEST_TIMEOUT", 60), 300),
+)
 
-# Rasm yaratish timeout (soniya). 5-600
-IMAGE_TIMEOUT = max(5, min(_int("IMAGE_TIMEOUT", 120), 600))
+IMAGE_TIMEOUT = max(
+    5,
+    min(_int("IMAGE_TIMEOUT", 120), 600),
+)
 
-# Telegram xabar maksimal uzunligi (belgi). Telegram limiti: 4096
 TELEGRAM_MAX_CHARS = 3500
 
-# Health-check server porti (Northflank uchun). 0 = o'chirilgan
+# Northflank PORT qiymatini avtomatik ishlatadi.
 HEALTH_PORT = max(0, _int("PORT", _int("HEALTH_PORT", 8080)))
