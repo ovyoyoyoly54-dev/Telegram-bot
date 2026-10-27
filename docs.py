@@ -11,6 +11,7 @@ import deck as deck_mod
 import files
 import images
 import llm
+import presenton
 import state
 
 log = logging.getLogger("docs")
@@ -157,6 +158,22 @@ def generate(
         instruction = instruction[:10000]
 
     if _is_deck(instruction):
+        if config.PRESENTON_ENABLED:
+            try:
+                name, data, summary = presenton.generate_presentation(
+                    instruction,
+                    n_slides=_slide_count(instruction),
+                    language="Uzbek",
+                )
+            except presenton.PresentonError as exc:
+                raise DocError(str(exc)) from exc
+            return GenerateResult(
+                name=name,
+                data=data,
+                text=instruction,
+                summary=summary,
+                images_added=0,
+            )
         return _generate_deck(history, instruction, doc, allow_images)
 
     return _generate_file(history, instruction, doc)
@@ -168,6 +185,11 @@ def _is_deck(text: str) -> bool:
         r"презентац|слайд)"
     )
     return bool(re.search(pattern, text or "", re.I))
+
+
+def _slide_count(text: str) -> int:
+    match = re.search(r"\b(\d{1,2})\s*(?:ta\s*)?(?:slayd|slide)\b", text, re.I)
+    return max(5, min(int(match.group(1)), 15)) if match else 8
 
 
 # ================================================================

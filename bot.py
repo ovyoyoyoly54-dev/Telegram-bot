@@ -521,6 +521,7 @@ def cmd_status(message):
         f"🧠 AI: {html.escape(', '.join(providers) or 'Kalit topilmadi')}\n"
         f"🌐 Brave Search: {'Sozlangan' if config.BRAVE_SEARCH_ENABLED else 'Kalit topilmadi'}\n"
         f"🎨 Rasm: {'Yoqilgan' if config.IMAGES_ENABLED else 'O‘chiq'}\n"
+        f"📊 Presenton: {'Yoqilgan' if config.PRESENTON_ENABLED else 'Ichki generator'}\n"
         f"🎭 Rejim: {html.escape(MODES[state.get_mode(user_id)][0])}\n"
         f"🖼 Qolgan rasm limiti: {state.images_left(user_id)}\n"
         f"📄 Qolgan fayl limiti: {state.files_left(user_id)}\n"

@@ -36,6 +36,9 @@ Dockerfile      # Northflank shu orqali quradi
 | `GROQ_API_KEY` | ✅ | console.groq.com |
 | `CF_ACCOUNT_ID`, `CF_API_TOKEN` | ❌ | Ikkalasi ham berilsa, rasm funksiyalari yoqiladi |
 | `GEMINI_API_KEY` | ❌ | Zaxira (aistudio.google.com/apikey) |
+| `PRESENTON_API_KEY` | ❌ | Sozlanganda `/fayl ... taqdimot` so'rovlari Presenton API orqali PPTX yaratadi; bo'sh bo'lsa ichki generator ishlaydi |
+| `PRESENTON_BASE_URL` | ❌ | Presenton API manzili (standart `https://api.presenton.ai`) |
+| `PRESENTON_TIMEOUT` | ❌ | Presenton yaratish/yuklab olish timeouti, soniyada (standart 300) |
 | `ALLOWED_USERS` | ❌ | Vergul bilan ID'lar: `123456,789012`. Bo'sh = hamma uchun ochiq. ID'ni botdagi `/id` dan oling |
 | `IMAGE_DAILY_LIMIT` | ❌ | Bir kishiga kuniga rasm soni (standart 5, `0` = cheksiz) |
 | `RATE_LIMIT_SECONDS` | ❌ | Xabarlar orasidagi minimal vaqt (standart 3) |

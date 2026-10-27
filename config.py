@@ -131,6 +131,14 @@ OPENROUTER_VISION_MODEL = (
 # AI PROVAYDERLARI
 # ================================================================
 
+# Presenton: kalit bo'sh bo'lsa, bot ichki PowerPoint generatoridan foydalanadi.
+PRESENTON_API_KEY = _get("PRESENTON_API_KEY")
+PRESENTON_BASE_URL = _get(
+    "PRESENTON_BASE_URL", "https://api.presenton.ai"
+).rstrip("/")
+PRESENTON_TIMEOUT = max(10, min(_int("PRESENTON_TIMEOUT", 300), 600))
+PRESENTON_ENABLED = bool(PRESENTON_API_KEY)
+
 PROVIDERS = ("groq", "openrouter", "gemini")
 
 CHAT_PROVIDER = _get("CHAT_PROVIDER", "groq").lower()
