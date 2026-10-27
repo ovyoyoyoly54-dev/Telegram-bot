@@ -2,9 +2,11 @@
 """Fayllarni o'qish, saqlash va AI yordamida yangi fayl/taqdimot yaratish."""
 
 import logging
+import io
 import re
 import time
 from dataclasses import dataclass
+from pptx import Presentation
 
 import config
 import deck as deck_mod
@@ -165,31 +167,49 @@ def generate(
                     n_slides=_slide_count(instruction),
                     language="Uzbek",
                 )
-            except presenton.PresentonError as exc:
-                raise DocError(str(exc)) from exc
-            return GenerateResult(
-                name=name,
-                data=data,
-                text=instruction,
-                summary=summary,
-                images_added=0,
-            )
+                actual_slides = _pptx_slide_count(data)
+                expected_slides = _slide_count(instruction)
+                if actual_slides != expected_slides:
+                    raise ValueError(
+                        f"Presenton {expected_slides} o'rniga "
+                        f"{actual_slides} slayd qaytardi"
+                    )
+                return GenerateResult(
+                    name=name,
+                    data=data,
+                    text=instruction,
+                    summary=summary,
+                    images_added=0,
+                )
+            except Exception as exc:
+                log.warning(
+                    "Presenton failed; using internal presentation generator (%s)",
+                    type(exc).__name__,
+                )
         return _generate_deck(history, instruction, doc, allow_images)
 
     return _generate_file(history, instruction, doc)
 
 
 def _is_deck(text: str) -> bool:
-    pattern = (
-        r"(taqdimot|prezentatsiya|presentation|slayd|slide|pptx|powerpoint|"
-        r"презентац|слайд)"
-    )
+    pattern = r"(taqdimot|prezentatsiya|presentation|slayd|slide|pptx|powerpoint|\u043f\u0440\u0435\u0437\u0435\u043d\u0442\u0430\u0446|\u0441\u043b\u0430\u0439\u0434)"
     return bool(re.search(pattern, text or "", re.I))
 
 
 def _slide_count(text: str) -> int:
-    match = re.search(r"\b(\d{1,2})\s*(?:ta\s*)?(?:slayd|slide)\b", text, re.I)
-    return max(5, min(int(match.group(1)), 15)) if match else 8
+    match = re.search(
+        r"\b(\d{1,2})\s*(?:ta\s*)?(?:slayd\w*|slides?|\u0441\u043b\u0430\u0439\u0434\w*)\b",
+        text,
+        re.I,
+    )
+    return max(5, min(int(match.group(1)), 20)) if match else 8
+
+
+def _pptx_slide_count(data: bytes) -> int:
+    """Reject invalid or empty presentation payloads before sending them."""
+    if not data:
+        raise ValueError("PPTX fayli bo'sh")
+    return len(Presentation(io.BytesIO(data)).slides)
 
 
 # ================================================================
@@ -299,6 +319,12 @@ def _generate_deck(
         raise DocError("Hech qanday AI API kaliti sozlanmagan.")
 
     system = _deck_system(doc)
+    expected_slides = _slide_count(instruction)
+    system += (
+        f"\nAniq {expected_slides} ta slayd yarat. Taqdimot kirish, mavzuni "
+        "bosqichma-bosqich batafsil tushuntirish, misollar va xulosani qamrasin. "
+        "Har bir slaydda sarlavhadan tashqari mazmunli izoh yoki tushuntirish bo'lsin."
+    )
     base_messages = list(history or []) + [
         {"role": "user", "content": instruction}
     ]
@@ -341,6 +367,11 @@ def _generate_deck(
 
                 parsed = deck_mod.parse_json(raw)
                 normalized = deck_mod.normalize(parsed)
+                if len(normalized["slides"]) != expected_slides:
+                    raise ValueError(
+                        f"Model {expected_slides} o'rniga "
+                        f"{len(normalized['slides'])} slayd qaytardi"
+                    )
 
                 score = _score_deck(normalized)
                 candidates.append((score, normalized, provider))
@@ -380,6 +411,11 @@ def _generate_deck(
             )
             parsed = deck_mod.parse_json(raw)
             normalized = deck_mod.normalize(parsed)
+            if len(normalized["slides"]) != expected_slides:
+                raise ValueError(
+                    f"Model {expected_slides} o'rniga "
+                    f"{len(normalized['slides'])} slayd qaytardi"
+                )
             candidates.append(
                 (_score_deck(normalized), normalized, "fallback")
             )
@@ -435,6 +471,14 @@ def _generate_deck(
 
     if not pptx_bytes:
         raise DocError("PowerPoint fayli bo'sh yaratildi.")
+    try:
+        actual_slides = _pptx_slide_count(pptx_bytes)
+    except Exception as exc:
+        raise DocError("PowerPoint fayli yaroqli PPTX emas.") from exc
+    if actual_slides != expected_slides:
+        raise DocError(
+            f"PowerPoint {expected_slides} o'rniga {actual_slides} slayd yaratdi."
+        )
 
     title = str(best_deck.get("title") or instruction[:60] or "Taqdimot")
     safe_title = files.safe_name(title, "taqdimot.pptx")

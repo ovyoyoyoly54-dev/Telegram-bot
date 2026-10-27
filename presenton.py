@@ -48,7 +48,7 @@ def generate_presentation(
 
     payload = {
         "content": detailed_content,
-        "n_slides": max(5, min(int(n_slides), 15)),
+        "n_slides": max(5, min(int(n_slides), 20)),
         "language": "Uzbek",
         "standard_template": "general",
         "export_as": export_as,

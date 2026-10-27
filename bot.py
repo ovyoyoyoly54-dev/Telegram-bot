@@ -73,6 +73,16 @@ _FILE_HINT = re.compile(
     r"taqdimot|slayd|slide|pptx|powerpoint)\b",
     re.I,
 )
+_PRESENTATION_TERM = re.compile(
+    r"\b(prezentatsiya|taqdimot|\u043f\u0440\u0435\u0437\u0435\u043d\u0442\u0430\u0446\w*|presentation|slides?|slayd\w*|\u0441\u043b\u0430\u0439\u0434\w*|pptx|powerpoint)\b",
+    re.I,
+)
+_PRESENTATION_ACTION = re.compile(
+    r"(qilib\s*ber|tayyor\w*|yarat\w*|yasab\s*ber|"
+    r"\u0441\u043e\u0437\u0434\w*|\u0441\u0434\u0435\u043b\u0430\w*|\u043f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\w*|\u0441\u0433\u0435\u043d\u0435\u0440\u0438\u0440\w*|"
+    r"create|make|prepare|generate|build|\b\d{1,2}\s*(?:ta\s*)?(?:slayd\w*|slides?|\u0441\u043b\u0430\u0439\u0434\w*)\b)",
+    re.I,
+)
 _DOCEDIT_HINT = re.compile(
     r"\b(tahrir|tuzat|qayta yoz|tarjima|qo'sh|o'chir|"
     r"qisqartir|kengaytir|formatla|to'g'rila|to'ldir|"
@@ -104,6 +114,15 @@ _REALTIME_HINT = re.compile(
 def looks_like_image_request(text, has_image=False):
     text = _norm(text)
     return bool(_DRAW_HINT.search(text) or (has_image and _EDIT_HINT.search(text)))
+
+
+def is_presentation_request(text):
+    """Detect presentation creation requests before the general AI classifier."""
+    normalized = _norm(text)
+    return bool(
+        _PRESENTATION_TERM.search(normalized)
+        and _PRESENTATION_ACTION.search(normalized)
+    )
 
 
 # ============================================================
@@ -405,6 +424,12 @@ def route_text(message, text):
     normalized = _norm(text)
     last_image = state.get_image(user_id) if config.IMAGES_ENABLED else None
     uploaded_doc = docs.get(user_id)
+
+    # Presentation creation is deterministic: do not let the general intent
+    # classifier redirect a clear PPT request to ordinary chat.
+    if is_presentation_request(normalized):
+        do_file(message, text)
+        return
 
     wants_image = config.IMAGES_ENABLED and looks_like_image_request(text, last_image is not None)
     wants_file = bool(_FILE_HINT.search(normalized) or (uploaded_doc and _DOCEDIT_HINT.search(normalized)))
