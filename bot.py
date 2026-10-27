@@ -1,7 +1,7 @@
 
-"""
-AI Telegram Bot — asosiy ishga tushirish fayli.
 
+"""
+AI Telegram Bot
 Imkoniyatlar:
 - Groq, OpenRouter va Gemini orqali AI suhbat
 - Brave Search orqali internet qidiruvi
