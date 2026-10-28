@@ -66,6 +66,39 @@ class PresentonTests(unittest.TestCase):
                 presenton.generate_presentation("Mavzu")
         self.assertEqual(caught.exception.kind, "Timeout")
 
+    def test_payload_types_and_invalid_inputs_are_normalized(self):
+        with patch.object(presenton.requests, "post", return_value=FakeResponse()) as post, \
+                patch.object(presenton.requests, "get", return_value=FakeResponse()):
+            presenton.generate_presentation("Mavzu", n_slides="x", theme=" ", language=None)
+        payload = post.call_args.kwargs["json"]
+        self.assertIs(type(payload["n_slides"]), int)
+        self.assertEqual(payload["n_slides"], 8)
+        self.assertEqual(payload["language"], "Uzbek")
+        self.assertEqual(payload["standard_template"], "general")
+        self.assertEqual(payload["export_as"], "pptx")
+        self.assertIs(type(payload["content"]), str)
+
+    def test_http_error_statuses_log_redacted_response_body(self):
+        cases = ((422, "ValidationError"), (429, "RateLimitError"), (500, "ServerError"))
+        for status, kind in cases:
+            response = FakeResponse(status, {"detail": "generator failed", "token": "sk-presenton-test-secret"})
+            with self.subTest(status=status), patch.object(presenton.requests, "post", return_value=response), \
+                    self.assertLogs("presenton", level="WARNING") as captured:
+                with self.assertRaises(presenton.PresentonError) as caught:
+                    presenton.generate_presentation("Mavzu")
+            self.assertEqual((caught.exception.status, caught.exception.kind), (status, kind))
+            line = "\n".join(captured.output)
+            self.assertIn("generator failed", line)
+            self.assertIn("response_body", line)
+            self.assertNotIn("test-secret", line)
+
+    def test_500_does_not_claim_authentication_failure(self):
+        with patch.object(presenton.requests, "post", return_value=FakeResponse(500, {"detail": "internal error"})):
+            with self.assertRaises(presenton.PresentonError) as caught:
+                presenton.generate_presentation("Mavzu")
+        self.assertEqual(caught.exception.kind, "ServerError")
+        self.assertNotIn("kalit", str(caught.exception).lower())
+
     def test_malformed_base_url_is_reported_without_request(self):
         config.PRESENTON_BASE_URL = "not a URL"
         with patch.object(presenton.requests, "post") as post:

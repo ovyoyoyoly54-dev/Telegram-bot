@@ -1,6 +1,7 @@
 """Presenton Cloud and self-hosted presentation API client."""
 
 import logging
+import json
 import re
 from urllib.parse import urljoin, urlparse
 
@@ -43,15 +44,7 @@ def _response_detail(response, prompt: str) -> str:
     """Extract service diagnostics while scrubbing credentials and request content."""
     try:
         body = response.json()
-        if isinstance(body, dict):
-            candidates = [body.get(key) for key in (
-                "detail", "message", "error", "code", "reason", "status", "traceback",
-            )]
-            detail = "; ".join(str(value) for value in candidates if value)
-            if not detail:
-                detail = str(body)
-        else:
-            detail = str(body)
+        detail = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
     except (ValueError, AttributeError):
         detail = getattr(response, "text", "") or ""
     detail = re.sub(r"(?i)bearer\s+\S+|sk-presenton-[\w-]+", "[REDACTED]", detail)
@@ -70,7 +63,7 @@ def _raise_http(response, prompt: str, operation: str, endpoint: str) -> None:
     status = response.status_code
     detail = _response_detail(response, prompt)
     if status in (401, 403):
-        message, kind = "Presenton API kaliti noto'g'ri yoki ruxsatsiz.", "AuthenticationError"
+        message, kind = "Presenton so'rovni autentifikatsiya yoki ruxsat sababli rad etdi.", "AuthenticationError"
     elif status == 404:
         message, kind = "Presenton endpoint yoki fayl topilmadi.", "EndpointNotFound"
     elif status == 422:
@@ -81,6 +74,9 @@ def _raise_http(response, prompt: str, operation: str, endpoint: str) -> None:
         message, kind = "Presenton serverida xatolik yuz berdi.", "ServerError"
     else:
         message, kind = f"Presenton {operation} so'rovi bajarilmadi (HTTP {status}).", "HTTPError"
+    if status >= 400:
+        log.warning("Presenton %s failed: status=%s endpoint=%s response_body=%s",
+                    operation, status, endpoint, detail or "<empty>")
     raise PresentonError(message, kind=kind, status=status, detail=detail, endpoint=endpoint)
 
 
@@ -105,7 +101,15 @@ def generate_presentation(prompt: str, n_slides: int = 8, theme: str = "general"
         "takroriy fon va bir xil sahna ishlatmang. Mavzuga aloqasiz yoki "
         "tekshirilmagan faktlarni qo'shmang."
     )
-    slides = max(5, min(int(n_slides), 20))
+    try:
+        slides = int(n_slides)
+    except (TypeError, ValueError, OverflowError):
+        slides = 8
+    slides = max(5, min(slides, 20))
+    language = language.strip() if isinstance(language, str) else ""
+    language = language or "Uzbek"
+    theme = theme.strip() if isinstance(theme, str) else ""
+    theme = theme or "general"
     cloud = config.PRESENTON_API_MODE == "cloud"
     payload = {"content": detailed_content, "n_slides": slides, "language": language,
                ("standard_template" if cloud else "template"): theme, "export_as": export_as}
@@ -144,10 +148,12 @@ def generate_presentation(prompt: str, n_slides: int = 8, theme: str = "general"
                         f"{parts.scheme}://{parts.netloc}/[download]")
         data = file_response.content
     except requests.Timeout as exc:
+        log.warning("Presenton request timed out: endpoint=%s timeout=%s", locals().get("safe_endpoint", "unavailable"), config.PRESENTON_TIMEOUT)
         raise PresentonError("Presenton javobi kutilgan vaqtda kelmadi.", kind="Timeout", detail=type(exc).__name__) from exc
     except requests.exceptions.InvalidURL as exc:
         raise PresentonError("Presenton URL noto'g'ri.", kind="InvalidURL", detail="Requests rejected the configured URL") from exc
     except requests.RequestException as exc:
+        log.warning("Presenton network request failed: endpoint=%s error=%s", locals().get("safe_endpoint", "unavailable"), type(exc).__name__)
         raise PresentonError("Presenton xizmatiga ulanib bo'lmadi.", kind="NetworkError", detail=type(exc).__name__) from exc
 
     if not data:
