@@ -60,9 +60,10 @@ def generate_presentation(
         "standard_template": "general",
         "export_as": export_as,
     }
+    base_url = config.PRESENTON_BASE_URL.rstrip("/") + "/"
     try:
         response = requests.post(
-            "https://api.presenton.ai/api/v3/presentation/generate",
+            urljoin(base_url, "api/v3/presentation/generate"),
             headers=_headers(), json=payload, timeout=config.PRESENTON_TIMEOUT,
         )
         if response.status_code >= 400:
@@ -79,11 +80,13 @@ def generate_presentation(
         if not isinstance(file_path, str) or not file_path.strip():
             raise PresentonError("Presenton fayl manzilini qaytarmadi.")
 
-        download_url = urljoin("https://api.presenton.ai/", file_path)
+        download_url = urljoin(base_url, file_path)
         file_parts = urlparse(download_url)
+        base_parts = urlparse(base_url)
         if (
             file_parts.scheme != "https"
-            or file_parts.hostname != "api.presenton.ai"
+            or file_parts.hostname != base_parts.hostname
+            or file_parts.port != base_parts.port
             or file_parts.username
             or file_parts.password
         ):

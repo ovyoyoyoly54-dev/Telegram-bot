@@ -36,7 +36,7 @@ def _required(name: str) -> str:
     value = _get(name)
     if not value:
         raise SystemExit(
-            f"❌ {name} topilmadi. Environment Variables sozlamalarini tekshiring."
+            f"❌ {name} topilmadi. Environment Variables yoki .env faylini tekshiring."
         )
     return value
 
@@ -116,16 +116,10 @@ OPENROUTER_API_KEYS = list(dict.fromkeys(
     if key
 ))
 
-OPENROUTER_API_KEY = (
-    OPENROUTER_API_KEY_1
-    or OPENROUTER_API_KEY_LEGACY
-    or OPENROUTER_API_KEY_2
-)
+OPENROUTER_API_KEY = next(iter(OPENROUTER_API_KEYS), "")
 
 OPENROUTER_MODEL = _get("OPENROUTER_MODEL", "openrouter/free")
-OPENROUTER_VISION_MODEL = (
-    _get("OPENROUTER_VISION_MODEL") or OPENROUTER_MODEL
-)
+OPENROUTER_VISION_MODEL = _get("OPENROUTER_VISION_MODEL")
 
 
 # ================================================================
@@ -142,36 +136,50 @@ PRESENTON_ENABLED = bool(PRESENTON_API_KEY)
 
 PROVIDERS = ("groq", "openrouter", "gemini")
 
-CHAT_PROVIDER = _get("CHAT_PROVIDER", "groq").lower()
-FILE_PROVIDER = _get(
-    "FILE_PROVIDER",
-    "openrouter" if OPENROUTER_API_KEY else "groq",
-).lower()
 
-for _name, _value in (
-    ("CHAT_PROVIDER", CHAT_PROVIDER),
-    ("FILE_PROVIDER", FILE_PROVIDER),
-):
-    if _value not in PROVIDERS:
+
+def _provider_defaults(groq_key, openrouter_keys, gemini_key,
+                       chat_preference="", file_preference=""):
+    configured = []
+    if groq_key:
+        configured.append("groq")
+    if openrouter_keys:
+        configured.append("openrouter")
+    if gemini_key:
+        configured.append("gemini")
+    if not configured:
         raise SystemExit(
-            f"❌ {_name} noto'g'ri. "
-            "Qiymat groq, openrouter yoki gemini bo'lishi mumkin."
+            "AI provayderi sozlanmagan: GROQ_API_KEY, OPENROUTER_API_KEY_1/2 yoki GEMINI_API_KEY dan kamida bittasini kiriting."
         )
 
-    if _value == "groq" and not GROQ_API_KEY:
-        raise SystemExit(
-            f"❌ {_name}=groq, lekin GROQ_API_KEY sozlanmagan."
-        )
+    for name, preference in (
+        ("CHAT_PROVIDER", chat_preference),
+        ("FILE_PROVIDER", file_preference),
+    ):
+        if preference and preference.lower() not in PROVIDERS:
+            raise SystemExit(
+                f"{name} noto'g'ri. Qiymat groq, openrouter yoki gemini bo'lishi mumkin."
+            )
 
-    if _value == "openrouter" and not OPENROUTER_API_KEY:
-        raise SystemExit(
-            f"❌ {_name}=openrouter, lekin OpenRouter kaliti sozlanmagan."
-        )
+    chat_provider = (chat_preference or configured[0]).lower()
+    if chat_provider not in configured:
+        chat_provider = configured[0]
+    file_provider = (
+        file_preference
+        or ("openrouter" if "openrouter" in configured else chat_provider)
+    ).lower()
+    if file_provider not in configured:
+        file_provider = chat_provider
+    return chat_provider, file_provider
 
-    if _value == "gemini" and not GEMINI_API_KEY:
-        raise SystemExit(
-            f"❌ {_name}=gemini, lekin GEMINI_API_KEY sozlanmagan."
-        )
+
+CHAT_PROVIDER, FILE_PROVIDER = _provider_defaults(
+    GROQ_API_KEY,
+    OPENROUTER_API_KEYS,
+    GEMINI_API_KEY,
+    _get("CHAT_PROVIDER"),
+    _get("FILE_PROVIDER"),
+)
 
 
 # ================================================================
@@ -213,15 +221,18 @@ if REASONING_EFFORT not in ("low", "medium", "high"):
 # TOKEN LIMITLARI
 # ================================================================
 
-CHAT_MAX_TOKENS = max(
-    128,
-    min(_int("CHAT_MAX_TOKENS", 8192), 16384),
-)
+MAX_OUTPUT_TOKENS = 8192
+CHAT_MAX_TOKENS = max(1, min(_int("CHAT_MAX_TOKENS", 2048), MAX_OUTPUT_TOKENS))
 
 PRESENTATION_MAX_TOKENS = max(
-    4096,
-    min(_int("PRESENTATION_MAX_TOKENS", 8192), 16384),
+    1,
+    min(_int("PRESENTATION_MAX_TOKENS", 4096), MAX_OUTPUT_TOKENS),
 )
+FILE_MAX_TOKENS = max(1, min(_int("FILE_MAX_TOKENS", 2048), MAX_OUTPUT_TOKENS))
+
+GROQ_CONTEXT_TOKENS = max(1024, _int("GROQ_CONTEXT_TOKENS", 32768))
+OPENROUTER_CONTEXT_TOKENS = max(1024, _int("OPENROUTER_CONTEXT_TOKENS", 8192))
+GEMINI_CONTEXT_TOKENS = max(1024, _int("GEMINI_CONTEXT_TOKENS", 32768))
 
 
 # ================================================================

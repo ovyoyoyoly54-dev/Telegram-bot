@@ -348,7 +348,11 @@ def protected(func):
                 return func(message, *args, **kwargs)
             except (llm.LLMError, images.ImageError, docs.DocError) as exc:
                 log.warning("So'rov xatosi: %s", type(exc).__name__, exc_info=True)
-                safe_reply(message, f"⚠️ So'rov bajarilmadi: {str(exc)[:350]}")
+                safe_reply(
+                    message,
+                    "⚠️ So'rov bajarilmadi: "
+                    + llm._redact_secrets(exc)[:350],
+                )
             except ApiTelegramException:
                 log.exception("Telegram API xatosi")
                 safe_reply(message, "⚠️ Telegram bilan aloqa xatosi. Keyinroq urinib ko'ring.")
@@ -372,7 +376,7 @@ def do_chat(message, text, image=None, label=None):
     uploaded_doc = docs.get(user_id)
     if uploaded_doc and (
         _DOCEDIT_HINT.search(_norm(text))
-        or re.search(r"\b(fayl|hujjat|shu hujjat|bu hujjat|undagi|mazmuni)\b", _norm(text))
+        or re.search(r"\b(fayl\w*|hujjat\w*|undagi|mazmun\w*)\b", _norm(text))
     ):
         system += docs.context_block(uploaded_doc)
 
@@ -382,11 +386,7 @@ def do_chat(message, text, image=None, label=None):
         # Muhim: qidiruv ishlamasa, oddiy AI'ga jim o'tib ketmaydi.
         answer = llm.chat_with_search(history, text, system)
     else:
-        try:
-            answer = llm.chat(history, text, system, image=image)
-        except Exception:
-            log.warning("Asosiy AI javob bermadi; zaxira usuli sinab ko'riladi", exc_info=True)
-            answer = llm.chat_multi(history, text, system, image=image)
+        answer = llm.chat(history, text, system, image=image)
 
     state.remember(user_id, label or text, answer)
     send_long(message, answer)
@@ -679,7 +679,10 @@ def cmd_search(message):
         return
 
     system = MODES[state.get_mode(message.from_user.id)][1]
-    answer = llm.chat_with_search(state.get_history(message.from_user.id), query, system)
+    answer = llm.chat_with_search(
+        state.get_history(message.from_user.id), query, system,
+        search_results=results,
+    )
     state.remember(message.from_user.id, f"[Internet qidiruvi] {query}", answer)
     send_long(message, answer)
 

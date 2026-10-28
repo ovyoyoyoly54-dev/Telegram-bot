@@ -321,7 +321,7 @@ def _generate_deck(
     """Bir nechta AI natijasini sinab, yaroqli taqdimotni tanlaydi."""
     # Asosiy provayderdan boshlab zaxira provayderlarni tanlaymiz.
     providers = llm._provider_order("file", False)
-    providers = providers[:BEST_OF_N]
+    target_candidates = min(BEST_OF_N, len(providers))
 
     if not providers:
         raise DocError("Hech qanday AI API kaliti sozlanmagan.")
@@ -341,6 +341,8 @@ def _generate_deck(
     errors: list[str] = []
 
     for provider in providers:
+        if len(candidates) >= target_candidates:
+            break
         # Bitta provayderda JSON noto'g'ri bo'lsa, bir marta tuzatib ko'rish.
         last_error = None
 
@@ -371,6 +373,7 @@ def _generate_deck(
                     None,
                     config.PRESENTATION_MAX_TOKENS,
                     0.4,
+                    task="presentation",
                 )
 
                 parsed = deck_mod.parse_json(raw)
@@ -398,41 +401,22 @@ def _generate_deck(
                     "Taqdimot yaratish xatosi (%s, urinish %s): %s",
                     provider,
                     attempt + 1,
-                    exc,
+                    type(exc).__name__,
                 )
+                if isinstance(exc, llm.LLMError):
+                    # HTTP/provider xatosida JSON-tuzatish urinishini takrorlama.
+                    break
 
         if last_error is not None and not any(
             candidate[2] == provider for candidate in candidates
         ):
-            errors.append(f"{provider}: {last_error}")
+            errors.append(f"{provider}: {llm._redact_secrets(last_error)}")
 
-    # Agar parallel/nomzod usuli ishlamasa, llm.chat fallback.
+    # Barcha providerlar allaqachon bir marta sinalgan; llm.chat orqali ayni
+    # fallback zanjirini qayta boshlash kredit va rate limitni behuda sarflaydi.
     if not candidates:
-        try:
-            raw = llm.chat(
-                history or [],
-                instruction,
-                system,
-                task="file",
-                max_tokens=config.PRESENTATION_MAX_TOKENS,
-                temperature=0.4,
-            )
-            parsed = deck_mod.parse_json(raw)
-            normalized = deck_mod.normalize(parsed)
-            if len(normalized["slides"]) != expected_slides:
-                raise ValueError(
-                    f"Model {expected_slides} o'rniga "
-                    f"{len(normalized['slides'])} slayd qaytardi"
-                )
-            candidates.append(
-                (_score_deck(normalized), normalized, "fallback")
-            )
-        except Exception as exc:
-            details = "; ".join(errors[-3:])
-            raise DocError(
-                f"Taqdimot yaratib bo'lmadi: {exc}"
-                + (f"\nTafsilot: {details}" if details else "")
-            ) from exc
+        details = "; ".join(errors[-3:]) or "AI providerdan yaroqli JSON javobi olinmadi."
+        raise DocError(f"Taqdimot yaratib bo'lmadi: {details}") from last_error
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     best_score, best_deck, best_provider = candidates[0]
@@ -574,7 +558,7 @@ Talablar:
             instruction,
             system,
             task="file",
-            max_tokens=config.PRESENTATION_MAX_TOKENS,
+            max_tokens=config.FILE_MAX_TOKENS,
             temperature=0.3,
         )
     except Exception as exc:

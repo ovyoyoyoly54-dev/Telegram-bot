@@ -29,6 +29,28 @@ def _sample_pptx(slide_count=12):
 
 
 class PresentationRoutingTests(unittest.TestCase):
+    def test_uploaded_file_summary_request_includes_document_context(self):
+        message = type("Message", (), {
+            "from_user": type("User", (), {"id": 42})(),
+            "chat": type("Chat", (), {"id": 42})(),
+        })()
+        document = {"name": "report.pdf", "text": "Private report contents"}
+
+        with (
+            patch.object(docs, "get", return_value=document),
+            patch.object(docs, "context_block", return_value="\nDOCUMENT CONTEXT"),
+            patch.object(bot.state, "get_history", return_value=[]),
+            patch.object(bot.bot, "send_chat_action"),
+            patch.object(bot.llm, "chat", return_value="summary") as chat,
+            patch.object(bot, "send_long"),
+        ):
+            bot.do_chat(
+                message,
+                "Men «report.pdf» faylini yubordim. Mazmunini 3 gapda tushuntir.",
+            )
+
+        self.assertIn("DOCUMENT CONTEXT", chat.call_args.args[2])
+
     def test_image_correction_regenerates_instead_of_answering_in_chat(self):
         correction = "Sher emas, mushuk deb qaytib yozsam"
         message = type("Message", (), {
@@ -159,6 +181,32 @@ class PresentationRoutingTests(unittest.TestCase):
         self.assertEqual(result, internal_result)
         self.assertEqual(api.call_args.kwargs["n_slides"], 12)
         fallback.assert_called_once()
+
+    def test_presenton_uses_configured_base_url_for_generation_and_download(self):
+        class Response:
+            status_code = 200
+            content = b"pptx-data"
+
+            def json(self):
+                return {"path": "generated/deck.pptx", "title": "Deck"}
+
+            def raise_for_status(self):
+                return None
+
+        with (
+            patch.object(config, "PRESENTON_ENABLED", True),
+            patch.object(config, "PRESENTON_API_KEY", "test-presenton-key"),
+            patch.object(config, "PRESENTON_BASE_URL", "https://presenton.example/api-root"),
+            patch.object(presenton.requests, "post", return_value=Response()) as post,
+            patch.object(presenton.requests, "get", return_value=Response()) as get,
+        ):
+            name, data, _ = presenton.generate_presentation("Test topic")
+
+        self.assertEqual(post.call_args.args[0], "https://presenton.example/api-root/api/v3/presentation/generate")
+        self.assertEqual(get.call_args.args[0], "https://presenton.example/api-root/generated/deck.pptx")
+        self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer test-presenton-key")
+        self.assertEqual(name, "Deck.pptx")
+        self.assertEqual(data, b"pptx-data")
 
     def test_presentation_requests_are_recognized_in_three_languages(self):
         for text in (

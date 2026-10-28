@@ -32,10 +32,8 @@ GEMINI_URL = (
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 
 _session = requests.Session()
-_session_lock = threading.Lock()
 _search_lock = threading.Lock()
 _search_cache = {}
-_openrouter_index = 0
 
 _THINK = re.compile(r"<think>.*?</think>", re.I | re.S)
 
@@ -91,6 +89,14 @@ class LLMError(Exception):
     """AI yoki internet xizmatidagi xato."""
 
 
+class ProviderAPIError(LLMError):
+    """Provider javob qaytardi, lekin HTTP status so'rovni rad etdi."""
+
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def _clean(text):
     return _THINK.sub("", str(text or "")).strip()
 
@@ -100,10 +106,23 @@ def _timeout():
 
 
 def _post(url, **kwargs):
-    try:
-        return _session.post(url, **kwargs)
-    except requests.RequestException as exc:
-        raise LLMError("Tarmoq bilan bog'liq xato yuz berdi.") from exc
+    # Timeout va provider 5xx uchun faqat bitta qayta urinish; 4xx хато
+    # (jumladan 402/429) qayta yuborilmaydi.
+    for attempt in range(2):
+        try:
+            response = _session.post(url, **kwargs)
+        except requests.Timeout as exc:
+            if attempt == 0:
+                time.sleep(0.2)
+                continue
+            raise LLMError("AI xizmati javob berishga ulgurmadi (timeout).") from exc
+        except requests.RequestException as exc:
+            raise LLMError("Tarmoq bilan bog'liq xato yuz berdi.") from exc
+        if response.status_code >= 500 and attempt == 0:
+            time.sleep(0.2)
+            continue
+        return response
+    raise LLMError("AI xizmati vaqtincha ishlamayapti.")
 
 
 def _get(url, **kwargs):
@@ -123,23 +142,24 @@ def _request_json(response, provider):
             raise LLMError(f"{provider}: server noto'g'ri JSON qaytardi.") from exc
 
     if status in (401, 403):
-        raise LLMError(f"{provider}: API kaliti yoki ruxsatni tekshiring.")
+        raise ProviderAPIError(f"{provider}: API kaliti yoki ruxsat muammosi ({status}).", status)
     if status == 402:
-        raise LLMError(f"{provider}: hisob yoki to'lov limitini tekshiring.")
+        raise ProviderAPIError(f"{provider}: kredit yoki mablag' limiti yetarli emas (402).", status)
     if status == 404:
         raise LLMError(f"{provider}: model yoki API manzili topilmadi.")
     if status == 429:
-        raise LLMError(f"{provider}: so'rovlar limiti tugadi.")
+        raise ProviderAPIError(f"{provider}: so'rovlar rate limitiga yetdi (429). Birozdan keyin urinib ko'ring.", status)
     if status >= 500:
-        raise LLMError(f"{provider}: server vaqtincha ishlamayapti.")
+        raise ProviderAPIError(f"{provider}: server vaqtincha ishlamayapti ({status}).", status)
 
     detail = ""
     try:
         detail = str(response.json().get("error", {}).get("message", ""))[:180]
     except (ValueError, AttributeError, TypeError):
         pass
+    detail = _redact_secrets(detail)
 
-    raise LLMError(f"{provider}: HTTP {status}. {detail}")
+    raise ProviderAPIError(f"{provider}: HTTP {status}. {detail}", status)
 
 
 def _extract_openai_text(data, provider):
@@ -242,42 +262,24 @@ def _chat_groq(messages, system, image_b64=None,
 # ============================================================
 
 def _get_openrouter_keys():
-    keys = getattr(config, "OPENROUTER_API_KEYS", None) or []
-
-    if isinstance(keys, str):
-        keys = [
-            key.strip()
-            for key in keys.split(",")
-            if key.strip()
-        ]
-
-    if not keys:
-        single = getattr(config, "OPENROUTER_API_KEY", "")
-        if single:
-            keys = [single]
-
-    return list(dict.fromkeys(key for key in keys if key))
-
-
-def _next_openrouter_key():
-    global _openrouter_index
-
-    keys = _get_openrouter_keys()
-    if not keys:
-        raise LLMError("OpenRouter API kaliti sozlanmagan.")
-
-    with _session_lock:
-        key = keys[_openrouter_index % len(keys)]
-        _openrouter_index += 1
-
-    return key
+    configured = getattr(config, "OPENROUTER_API_KEYS", None) or []
+    if isinstance(configured, str):
+        configured = configured.split(",")
+    configured = list(configured) + [
+        getattr(config, "OPENROUTER_API_KEY_1", ""),
+        getattr(config, "OPENROUTER_API_KEY_2", ""),
+        getattr(config, "OPENROUTER_API_KEY_LEGACY", ""),
+        getattr(config, "OPENROUTER_API_KEY", ""),
+    ]
+    # The three supported environment variable names are finite; the slice also
+    # bounds credential attempts if this internal setting is replaced.
+    return list(dict.fromkeys(
+        str(key).strip() for key in configured if str(key).strip()
+    ))[:3]
 
 
 def _chat_openrouter(messages, system, image_b64=None,
                      max_tokens=None, temperature=0.2):
-
-    api_key = _next_openrouter_key()
-
     if image_b64:
         model = getattr(config, "OPENROUTER_VISION_MODEL", "")
     else:
@@ -295,18 +297,39 @@ def _chat_openrouter(messages, system, image_b64=None,
         "max_tokens": max_tokens or config.CHAT_MAX_TOKENS,
     }
 
-    response = _post(
-        OPENROUTER_URL,
-        headers={
-            "Authorization": "Bearer " + api_key,
-            "X-Title": "AI Telegram Assistant",
-        },
-        json=payload,
-        timeout=_timeout(),
-    )
+    keys = _get_openrouter_keys()
+    if not keys:
+        raise LLMError("OpenRouter API kaliti sozlanmagan.")
 
-    data = _request_json(response, "OpenRouter")
-    return _extract_openai_text(data, "OpenRouter")
+    errors = []
+    for index, api_key in enumerate(keys, start=1):
+        try:
+            response = _post(
+                OPENROUTER_URL,
+                headers={
+                    "Authorization": "Bearer " + api_key,
+                    "X-Title": "AI Telegram Assistant",
+                },
+                json=payload,
+                timeout=_timeout(),
+            )
+            data = _request_json(response, "OpenRouter")
+            return _extract_openai_text(data, "OpenRouter")
+        except LLMError as exc:
+            errors.append(exc)
+            log.warning(
+                "OpenRouter credential %s/%s ishlamadi: %s",
+                index,
+                len(keys),
+                type(exc).__name__,
+            )
+
+    last = errors[-1]
+    if all(getattr(error, "status_code", None) == 402 for error in errors):
+        raise LLMError(
+            "OpenRouter'dagi sinab ko'rilgan kalitlar kredit yoki mablag' limiti sabab ishlamadi; boshqa kalitda kredit borligi kafolatlanmaydi."
+        ) from last
+    raise LLMError(_redact_secrets(str(last))) from last
 
 
 # ============================================================
@@ -435,6 +458,92 @@ def _provider_order(task="chat", has_image=False):
     return providers
 
 
+def _redact_secrets(text):
+    safe = str(text or "")
+    for key in _get_openrouter_keys() + [
+        getattr(config, "GROQ_API_KEY", ""),
+        getattr(config, "GEMINI_API_KEY", ""),
+    ]:
+        if key:
+            safe = safe.replace(key, "[REDACTED]")
+    return safe[:500]
+
+
+def _content_size(content):
+    if isinstance(content, list):
+        size = 0
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "image_url":
+                size += 768 * 4  # conservative allowance for an image input
+            else:
+                size += len(str(part.get("text") or ""))
+        return size
+    return len(str(content or ""))
+
+
+def _estimated_input_tokens(messages, system):
+    chars = len(str(system or "")) + sum(
+        _content_size(message.get("content"))
+        for message in messages if isinstance(message, dict)
+    )
+    return max(1, (chars + 3) // 4)
+
+
+def _prepare_provider_request(provider, messages, system, task, max_tokens):
+    context_limit = max(1024, int(getattr(config, f"{provider.upper()}_CONTEXT_TOKENS", 32768)))
+    output_ceiling = int(getattr(config, "MAX_OUTPUT_TOKENS", 8192))
+    if task == "presentation":
+        configured = int(getattr(config, "PRESENTATION_MAX_TOKENS", 4096))
+    elif task == "file":
+        configured = int(getattr(config, "FILE_MAX_TOKENS", 2048))
+    else:
+        configured = int(getattr(config, "CHAT_MAX_TOKENS", 2048))
+    requested = configured if max_tokens is None else max(1, int(max_tokens))
+    desired_output = max(1, min(requested, configured, output_ceiling))
+    prepared = list(messages)
+
+    # Old history is expendable; preserve the current request and recent context.
+    while len(prepared) > 1 and _estimated_input_tokens(prepared, system) + 128 + 128 > context_limit:
+        if (
+            len(prepared) > 2
+            and prepared[0].get("role") == "user"
+            and prepared[1].get("role") == "assistant"
+        ):
+            del prepared[:2]
+        else:
+            prepared.pop(0)
+
+    input_tokens = _estimated_input_tokens(prepared, system)
+    available_output = context_limit - input_tokens - 128
+    if available_output < 1:
+        raise LLMError(
+            "So'rov modeli kontekst sig'imidan katta. Promptni qisqartiring yoki hujjatni kichikroq qismlarga bo'ling."
+        )
+    return prepared, min(desired_output, available_output)
+
+
+def _call_one(provider, messages, system, image_b64=None,
+              max_tokens=None, temperature=0.2, task="file"):
+    """Bitta sozlangan providerga context/output chegaralari bilan murojaat qiladi."""
+    caller = _PROVIDERS.get(provider)
+    if caller is None:
+        raise LLMError(f"Noma'lum AI provayderi: {provider}")
+    prepared, output_limit = _prepare_provider_request(
+        provider, messages, system,
+        "presentation" if task == "presentation" else task,
+        max_tokens,
+    )
+    return caller(
+        prepared,
+        system,
+        image_b64=image_b64,
+        max_tokens=output_limit,
+        temperature=temperature,
+    )
+
+
 # ============================================================
 # ASOSIY CHAT
 # ============================================================
@@ -443,17 +552,13 @@ def chat(history, user_text, system, image=None,
          max_tokens=None, task="chat", temperature=None):
 
     user_text = str(user_text or "")
+    is_presentation = bool(
+        task == "file"
+        and re.search(r"(taqdimot|prezentatsiya|slayd|presentation|powerpoint|pptx)", user_text, re.I)
+    )
 
-    if task == "file" and re.search(
-        r"(taqdimot|prezentatsiya|slayd|presentation|powerpoint|pptx)",
-        user_text,
-        re.I,
-    ):
+    if is_presentation:
         system = PRESENTATION_PROMPT + "\n\n" + (system or "")
-        max_tokens = max(
-            max_tokens or 0,
-            int(getattr(config, "PRESENTATION_MAX_TOKENS", 8192)),
-        )
 
     if temperature is None:
         temperature = 0.2 if task == "chat" else 0.35
@@ -474,16 +579,21 @@ def chat(history, user_text, system, image=None,
         raise LLMError("Hech qanday AI API kaliti sozlanmagan.")
 
     errors = []
+    token_task = "presentation" if is_presentation else task
 
     for provider in providers:
         try:
-            answer = _PROVIDERS[provider](
+            answer = _call_one(
+                provider,
                 messages,
                 system,
                 image_b64=image_b64,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                task=token_task,
             )
+            if not str(answer or "").strip():
+                raise LLMError(f"{provider} bo'sh javob qaytardi.")
             log.info("Javob yaratildi: %s", provider)
             return answer
 
@@ -493,12 +603,12 @@ def chat(history, user_text, system, image=None,
                 provider,
                 type(exc).__name__,
             )
-            errors.append(provider)
+            errors.append(f"{provider}: {_redact_secrets(exc)}")
 
     raise LLMError(
         "Barcha AI provayderlari ishlamadi: "
-        + ", ".join(errors)
-        + ". API kalitlari, model nomlari va limitlarni tekshiring."
+        + "; ".join(errors)
+        + ". Kalitlar, model nomlari, kredit va limitlarni tekshiring."
     )
 
 
@@ -740,19 +850,22 @@ def web_search(query, max_results=5, freshness=None):
 
 
 def chat_with_search(history, user_text, system,
-                     max_tokens=None, task="chat", temperature=None):
+                     max_tokens=None, task="chat", temperature=None,
+                     search_results=None):
     """Savolni aniqlashtiradi, bir nechta qidiruv o'tkazadi va javob beradi."""
-
-    queries = build_search_queries(history, user_text)
-    if not queries:
-        return "Savolni tushuna olmadim. Biroz batafsilroq yozib ko'ring."
 
     collected = []
     seen_urls = set()
+    if search_results is not None:
+        query = str(user_text or "").strip()
+        search_batches = [(query, search_results)]
+    else:
+        queries = build_search_queries(history, user_text)
+        if not queries:
+            return "Savolni tushuna olmadim. Biroz batafsilroq yozib ko'ring."
+        search_batches = [(query, web_search(query, max_results=4)) for query in queries[:3]]
 
-    for query in queries[:3]:
-        results = web_search(query, max_results=4)
-
+    for query, results in search_batches:
         if not results:
             continue
 
