@@ -96,6 +96,10 @@ BRAVE_SEARCH_ENABLED = bool(BRAVE_API_KEY)
 
 GEMINI_API_KEY = _get("GEMINI_API_KEY")
 GEMINI_MODEL = _get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_API_VERSION = _get("GEMINI_API_VERSION", "v1beta")
+GEMINI_FALLBACK_MODELS = list(dict.fromkeys(
+    item.strip() for item in _get("GEMINI_FALLBACK_MODELS").split(",") if item.strip()
+))
 
 
 # ================================================================

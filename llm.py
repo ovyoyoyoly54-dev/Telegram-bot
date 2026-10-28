@@ -25,10 +25,7 @@ log = logging.getLogger("llm")
 
 GROQ_BASE = "https://api.groq.com/openai/v1"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "{model}:generateContent"
-)
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 
 _session = requests.Session()
@@ -152,12 +149,12 @@ def _provider_error_detail(response):
         body = {}
     error = body.get("error", body) if isinstance(body, dict) else {}
     if not isinstance(error, dict):
-        return "", ""
+        return "", _redact_secrets(json.dumps(body, ensure_ascii=False) if body else "")
     code = str(error.get("status") or error.get("code") or "")[:80]
-    message = str(error.get("message") or error.get("detail") or "")[:240]
-    message = _redact_secrets(message)
-    message = re.sub(r"(?i)bearer\s+\S+|AIza[\w-]+|sk-[\w-]+", "[REDACTED]", message)
-    return code, message
+    diagnostic = json.dumps(body, ensure_ascii=False, separators=(",", ":")) if body else ""
+    diagnostic = _redact_secrets(diagnostic)
+    diagnostic = re.sub(r"(?i)bearer\s+\S+|AIza[\w-]+|sk-[\w-]+", "[REDACTED]", diagnostic)
+    return code, diagnostic[:1000]
 
 
 def _request_json(response, provider, model=None):
@@ -173,8 +170,10 @@ def _request_json(response, provider, model=None):
                            detail=f"response_json_error={type(exc).__name__}") from exc
 
     kind, label = "http_error", "API so'rov rad etildi"
-    if status in (401, 403):
-        kind, label = "authentication", "API kaliti yoki ruxsat muammosi"
+    if status == 401:
+        kind, label = "unauthorized", "API kaliti autentifikatsiyasi bajarilmadi"
+    if status == 403:
+        kind, label = "forbidden", "loyihada API yoki model uchun ruxsat yo'q"
     if status == 402:
         kind, label = "payment_required", "kredit yoki mablag' limiti yetarli emas"
     if status == 404:
@@ -386,6 +385,58 @@ def _chat_openrouter(messages, system, image_b64=None,
 # GEMINI
 # ============================================================
 
+def _gemini_version():
+    version = str(getattr(config, "GEMINI_API_VERSION", "v1beta") or "v1beta").strip()
+    if version not in ("v1", "v1beta"):
+        raise LLMError("GEMINI_API_VERSION faqat v1 yoki v1beta bo'lishi mumkin.",
+                       kind="configuration", provider="gemini")
+    return version
+
+
+def _gemini_model_url(model, method="generateContent"):
+    model = str(model or "").strip().removeprefix("models/")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", model):
+        raise LLMError("Gemini model nomi noto'g'ri.", kind="configuration", provider="gemini")
+    return f"{GEMINI_BASE_URL}/{_gemini_version()}/models/{model}:{method}"
+
+
+def check_gemini_access():
+    """List models with the configured key; useful as a no-generation access check."""
+    api_key = getattr(config, "GEMINI_API_KEY", "")
+    if not api_key:
+        raise LLMError("GEMINI_API_KEY sozlanmagan.", kind="configuration", provider="gemini")
+    response = _get(
+        f"{GEMINI_BASE_URL}/{_gemini_version()}/models",
+        headers={"x-goog-api-key": api_key, "Accept": "application/json"},
+        timeout=_timeout(),
+    )
+    data = _request_json(response, "Gemini")
+    entries = data.get("models", []) if isinstance(data, dict) else []
+    return sorted(
+        str(item.get("name", "")).removeprefix("models/")
+        for item in entries
+        if isinstance(item, dict)
+        and "generateContent" in (item.get("supportedGenerationMethods") or [])
+    )
+
+
+def _gemini_fallback_after_404(api_key, model):
+    candidates = getattr(config, "GEMINI_FALLBACK_MODELS", []) or []
+    if isinstance(candidates, str):
+        candidates = [item.strip() for item in candidates.split(",") if item.strip()]
+    if not candidates:
+        return None
+    try:
+        available = set(check_gemini_access())
+    except LLMError as exc:
+        log.warning("Gemini fallback model discovery failed: %s", exc.kind)
+        return None
+    for candidate in candidates:
+        normalized = str(candidate).strip().removeprefix("models/")
+        if normalized != model and normalized in available:
+            return normalized
+    return None
+
 def _chat_gemini(messages, system, image_b64=None,
                  max_tokens=None, temperature=0.2):
 
@@ -393,7 +444,7 @@ def _chat_gemini(messages, system, image_b64=None,
     if not api_key:
         raise LLMError("GEMINI_API_KEY sozlanmagan.")
 
-    model = getattr(config, "GEMINI_MODEL", "gemini-2.5-flash")
+    model = str(config.GEMINI_MODEL).strip().removeprefix("models/")
     contents = []
 
     for message in messages:
@@ -435,12 +486,18 @@ def _chat_gemini(messages, system, image_b64=None,
     }
 
     response = _post(
-        GEMINI_URL.format(model=model),
-        headers={"x-goog-api-key": api_key},
-        json=payload,
-        timeout=_timeout(),
+        _gemini_model_url(model), headers={"x-goog-api-key": api_key},
+        json=payload, timeout=_timeout(),
     )
-
+    if response.status_code == 404:
+        fallback_model = _gemini_fallback_after_404(api_key, model)
+        if fallback_model:
+            log.warning("Gemini configured model unavailable; using configured accessible fallback model=%s", fallback_model)
+            model = fallback_model
+            response = _post(
+                _gemini_model_url(model), headers={"x-goog-api-key": api_key},
+                json=payload, timeout=_timeout(),
+            )
     data = _request_json(response, "Gemini", model=model)
     if not isinstance(data, dict):
         raise LLMError("Gemini: javob JSON obyekt emas.", kind="invalid_response", model=model, provider="gemini")
@@ -600,7 +657,7 @@ def _call_one(provider, messages, system, image_b64=None,
     elif provider == "openrouter":
         model = getattr(config, "OPENROUTER_VISION_MODEL", "") if image_b64 else getattr(config, "OPENROUTER_MODEL", "")
     else:
-        model = getattr(config, "GEMINI_MODEL", "gemini-2.5-flash")
+        model = config.GEMINI_MODEL
     try:
         return caller(
             prepared,
@@ -673,11 +730,10 @@ def chat(history, user_text, system, image=None,
 
         except Exception as exc:
             last_error = exc
-            log.warning(
-                "%s ishlamadi: %s",
-                provider,
-                type(exc).__name__,
-            )
+            log.warning("%s ishlamadi: error=%s kind=%s status=%s model=%s detail=%s",
+                        provider, type(exc).__name__, getattr(exc, "kind", "n/a"),
+                        getattr(exc, "status_code", None), getattr(exc, "model", None),
+                        _redact_secrets(getattr(exc, "detail", "")))
             errors.append(f"{provider}: {_redact_secrets(exc)}")
 
     raise LLMError(

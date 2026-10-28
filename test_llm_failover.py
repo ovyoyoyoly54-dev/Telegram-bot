@@ -43,6 +43,55 @@ class HttpErrorTests(unittest.TestCase):
     def test_success_response_is_parsed(self):
         self.assertEqual(llm._request_json(_Response(200, {"ok": True}), "mock"), {"ok": True})
 
+    def test_http_errors_are_distinct_and_keep_sanitized_body(self):
+        cases = {
+            401: "unauthorized", 403: "forbidden", 404: "model_not_found",
+            429: "rate_limit", 503: "server_error",
+        }
+        for status, kind in cases.items():
+            response = _Response(status, {"error": {"status": "SAMPLE", "message": "model unavailable", "debug": "AIza-secret-value"}})
+            with self.subTest(status=status), self.assertRaises(llm.ProviderAPIError) as caught:
+                llm._request_json(response, "Gemini", model="gemini-example")
+            self.assertEqual(caught.exception.kind, kind)
+            self.assertIn("model unavailable", caught.exception.detail)
+            self.assertNotIn("AIza-secret-value", caught.exception.detail)
+
+    def test_gemini_v1beta_url_and_access_listing(self):
+        with patch.object(config, "GEMINI_API_VERSION", "v1beta"), \
+             patch.object(config, "GEMINI_API_KEY", "gemini-test-key"), \
+             patch.object(llm, "_session") as session:
+            session.get.return_value = _Response(200, {"models": [
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/embedding-test", "supportedGenerationMethods": ["embedContent"]},
+            ]})
+            models = llm.check_gemini_access()
+        self.assertEqual(models, ["gemini-2.5-flash"])
+        self.assertEqual(session.get.call_args.args[0], "https://generativelanguage.googleapis.com/v1beta/models")
+        self.assertEqual(session.get.call_args.kwargs["headers"]["x-goog-api-key"], "gemini-test-key")
+        self.assertEqual(llm._gemini_model_url("gemini-2.5-flash"),
+                         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+
+    def test_gemini_404_uses_only_configured_and_listed_fallback(self):
+        missing = _Response(404, {"error": {"message": "model not found"}})
+        success = _Response(200, {"candidates": [{"content": {"parts": [{"text": "fallback answer"}]}}]})
+        with patch.multiple(config, GEMINI_API_KEY="gemini-test-key", GEMINI_MODEL="gemini-original",
+                            GEMINI_FALLBACK_MODELS=["gemini-available"]), \
+             patch.object(llm, "_post", side_effect=[missing, success]) as post, \
+             patch.object(llm, "check_gemini_access", return_value=["gemini-available"]):
+            answer = llm._chat_gemini([{"role": "user", "content": "hello"}], "system")
+        self.assertEqual(answer, "fallback answer")
+        self.assertEqual(post.call_count, 2)
+        self.assertIn("gemini-available:generateContent", post.call_args.args[0])
+
+    def test_gemini_404_without_configured_fallback_is_not_retried(self):
+        with patch.multiple(config, GEMINI_API_KEY="gemini-test-key", GEMINI_MODEL="gemini-original",
+                            GEMINI_FALLBACK_MODELS=[]), \
+             patch.object(llm, "_post", return_value=_Response(404, {"error": {"message": "unknown model"}})) as post:
+            with self.assertRaises(llm.ProviderAPIError) as caught:
+                llm._chat_gemini([{"role": "user", "content": "hello"}], "system")
+        self.assertEqual(caught.exception.kind, "model_not_found")
+        post.assert_called_once()
+
     def test_rate_limit_is_not_retried_by_http_transport(self):
         with patch.object(llm._session, "post", return_value=_Response(429)) as post:
             self.assertEqual(llm._post("https://provider.invalid").status_code, 429)
