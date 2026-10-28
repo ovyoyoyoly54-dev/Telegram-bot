@@ -23,6 +23,11 @@ from pptx.util import Inches, Pt
 class DeckError(Exception):
     """Foydalanuvchiga ko'rsatish mumkin bo'lgan xato."""
 
+    def __init__(self, message: str, *, kind: str = "invalid_deck", detail: str = ""):
+        super().__init__(message)
+        self.kind = kind
+        self.detail = detail
+
 
 W, H = 13.333, 7.5
 MX = 0.8
@@ -185,9 +190,8 @@ def _norm_slide(s) -> dict | None:
 
 
 def normalize(d) -> dict:
-    if not isinstance(d, dict):
-        raise DeckError("Taqdimot tuzilmasi noto'g'ri.")
-    slides = [x for x in (_norm_slide(s) for s in (d.get("slides") or [])) if x][:MAX_SLIDES]
+    _validate_raw_deck(d)
+    slides = [x for x in (_norm_slide(s) for s in d["slides"]) if x][:MAX_SLIDES]
     if not slides:
         raise DeckError("Taqdimotda slaydlar topilmadi.")
     if len(slides) < MIN_SLIDES:
@@ -221,16 +225,88 @@ def normalize(d) -> dict:
     }
 
 
+def _validate_raw_deck(deck) -> None:
+    """Reject malformed provider output before normalization can hide its shape."""
+    if not isinstance(deck, dict):
+        raise DeckError("DeckError: javobning yuqori darajasi JSON obyekt bo'lishi kerak.")
+    for field in ("title", "theme"):
+        if field in deck and deck[field] is not None and not isinstance(deck[field], str):
+            raise DeckError(f"DeckError: '{field}' maydoni matn bo'lishi kerak.")
+    slides = deck.get("slides")
+    if not isinstance(slides, list):
+        raise DeckError("DeckError: 'slides' maydoni JSON ro'yxati bo'lishi kerak.")
+    if not slides:
+        raise DeckError("DeckError: 'slides' ro'yxati bo'sh.")
+    if len(slides) > MAX_SLIDES:
+        raise DeckError(f"DeckError: {len(slides)} slayd qaytdi, maksimum {MAX_SLIDES}.")
+
+    string_fields = ("title", "subtitle", "image_prompt", "notes", "quote", "author",
+                     "left_title", "right_title")
+    list_fields = ("bullets", "left", "right", "headers", "rows", "steps", "stats")
+    for index, slide in enumerate(slides, 1):
+        if not isinstance(slide, dict):
+            raise DeckError(f"DeckError: {index}-slayd JSON obyekt emas ({type(slide).__name__}).")
+        for field in string_fields:
+            if field in slide and slide[field] is not None and not isinstance(slide[field], str):
+                raise DeckError(f"DeckError: {index}-slayddagi '{field}' matn bo'lishi kerak.")
+        for field in list_fields:
+            if field in slide and slide[field] is not None and not isinstance(slide[field], (list, str)):
+                raise DeckError(f"DeckError: {index}-slayddagi '{field}' ro'yxat yoki matn bo'lishi kerak.")
+        for field in ("bullets", "left", "right", "headers"):
+            value = slide.get(field)
+            if isinstance(value, list) and any(not isinstance(item, str) for item in value):
+                raise DeckError(f"DeckError: {index}-slayddagi '{field}' elementlari matn bo'lishi kerak.")
+        if isinstance(slide.get("rows"), list) and any(
+            not isinstance(row, list) or any(not isinstance(cell, (str, int, float)) for cell in row)
+            for row in slide["rows"]
+        ):
+            raise DeckError(f"DeckError: {index}-slayddagi 'rows' qatorlar ro'yxati bo'lishi kerak.")
+        if isinstance(slide.get("stats"), list) and any(not isinstance(item, dict) for item in slide["stats"]):
+            raise DeckError(f"DeckError: {index}-slayddagi 'stats' obyektlar ro'yxati bo'lishi kerak.")
+        if isinstance(slide.get("steps"), list) and any(not isinstance(item, (dict, str)) for item in slide["steps"]):
+            raise DeckError(f"DeckError: {index}-slayddagi 'steps' obyekt yoki matn ro'yxati bo'lishi kerak.")
+        layout = slide.get("layout")
+        if layout is not None and (not isinstance(layout, str) or layout.strip().lower() not in LAYOUTS):
+            raise DeckError(f"DeckError: {index}-slayd layout qiymati tanilmagan.")
+        if "chart" in slide and slide["chart"] is not None and not isinstance(slide["chart"], dict):
+            raise DeckError(f"DeckError: {index}-slayddagi 'chart' obyekt bo'lishi kerak.")
+        if layout == "two_column" and not all(slide.get(key) for key in ("left", "right")):
+            raise DeckError(f"DeckError: {index}-slayd two_column uchun left va right talab qilinadi.")
+        if layout in ("bullets", "image_text") and not slide.get("bullets"):
+            raise DeckError(f"DeckError: {index}-slaydda bullets matni bo'sh.")
+        if layout == "stats" and not isinstance(slide.get("stats"), list):
+            raise DeckError(f"DeckError: {index}-slaydda stats ro'yxati talab qilinadi.")
+        if layout == "stats" and len(slide["stats"]) < 2:
+            raise DeckError(f"DeckError: {index}-slaydda kamida ikki stats elementi kerak.")
+        if layout == "steps" and not isinstance(slide.get("steps"), list):
+            raise DeckError(f"DeckError: {index}-slaydda steps ro'yxati talab qilinadi.")
+        if layout == "steps" and len(slide["steps"]) < 2:
+            raise DeckError(f"DeckError: {index}-slaydda kamida ikki steps elementi kerak.")
+        if layout == "quote" and not slide.get("quote"):
+            raise DeckError(f"DeckError: {index}-slaydda quote matni talab qilinadi.")
+        if layout == "table" and not all(slide.get(key) for key in ("headers", "rows")):
+            raise DeckError(f"DeckError: {index}-slayd table uchun headers va rows talab qilinadi.")
+        if layout == "chart" and not isinstance(slide.get("chart"), dict):
+            raise DeckError(f"DeckError: {index}-slaydda chart obyekt talab qilinadi.")
+        if layout in ("title", "section", "closing") and not (slide.get("title") or slide.get("subtitle")):
+            raise DeckError(f"DeckError: {index}-slayd uchun title yoki subtitle talab qilinadi.")
+
+
 def parse_json(raw: str) -> dict:
     """Model javobidan JSON ajratadi (``` va ortiqcha matnni olib tashlaydi)."""
     text = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", (raw or "").strip())
     a, b = text.find("{"), text.rfind("}")
     if a < 0 or b < a:
-        raise DeckError("Model taqdimotni JSON ko'rinishida qaytarmadi, qayta urinib ko'ring.")
+        raise DeckError(
+            "Model taqdimotni JSON ko'rinishida qaytarmadi, qayta urinib ko'ring.",
+            kind="missing_json_object", detail="No JSON object delimiters found",
+        )
     try:
         return json.loads(text[a:b + 1])
     except json.JSONDecodeError as exc:
-        raise DeckError("Model javobi buzilgan (JSON), qayta urinib ko'ring.") from exc
+        detail = f"line={exc.lineno}; column={exc.colno}; position={exc.pos}; reason={exc.msg[:120]}"
+        raise DeckError("Model javobi buzilgan (JSON), qayta urinib ko'ring.",
+                        kind="invalid_json", detail=detail) from exc
 
 
 def compact(deck: dict) -> str:

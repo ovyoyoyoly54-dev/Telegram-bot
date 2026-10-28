@@ -86,15 +86,25 @@ Faqat tayyor promptni qaytar.
 
 
 class LLMError(Exception):
-    """AI yoki internet xizmatidagi xato."""
+    """AI provider error with structured, credential-free diagnostics."""
+
+    def __init__(self, message, *, kind="provider_error", status_code=None,
+                 model=None, provider=None, detail=""):
+        super().__init__(message)
+        self.kind = kind
+        self.status_code = status_code
+        self.model = model
+        self.provider = provider
+        self.detail = detail
 
 
 class ProviderAPIError(LLMError):
     """Provider javob qaytardi, lekin HTTP status so'rovni rad etdi."""
 
-    def __init__(self, message, status_code=None):
-        super().__init__(message)
-        self.status_code = status_code
+    def __init__(self, message, status_code=None, *, kind="http_error", model=None,
+                 provider=None, detail=""):
+        super().__init__(message, kind=kind, status_code=status_code,
+                         model=model, provider=provider, detail=detail)
 
 
 def _clean(text):
@@ -115,9 +125,11 @@ def _post(url, **kwargs):
             if attempt == 0:
                 time.sleep(0.2)
                 continue
-            raise LLMError("AI xizmati javob berishga ulgurmadi (timeout).") from exc
+            raise LLMError("AI xizmati javob berishga ulgurmadi (timeout).",
+                           kind="timeout", detail=type(exc).__name__) from exc
         except requests.RequestException as exc:
-            raise LLMError("Tarmoq bilan bog'liq xato yuz berdi.") from exc
+            raise LLMError("Tarmoq bilan bog'liq xato yuz berdi.",
+                           kind="network_error", detail=type(exc).__name__) from exc
         if response.status_code >= 500 and attempt == 0:
             time.sleep(0.2)
             continue
@@ -132,43 +144,72 @@ def _get(url, **kwargs):
         raise LLMError("Internet xizmatiga ulanib bo'lmadi.") from exc
 
 
-def _request_json(response, provider):
+def _provider_error_detail(response):
+    """Read useful API diagnostics without exposing credentials or request content."""
+    try:
+        body = response.json()
+    except (ValueError, AttributeError):
+        body = {}
+    error = body.get("error", body) if isinstance(body, dict) else {}
+    if not isinstance(error, dict):
+        return "", ""
+    code = str(error.get("status") or error.get("code") or "")[:80]
+    message = str(error.get("message") or error.get("detail") or "")[:240]
+    message = _redact_secrets(message)
+    message = re.sub(r"(?i)bearer\s+\S+|AIza[\w-]+|sk-[\w-]+", "[REDACTED]", message)
+    return code, message
+
+
+def _request_json(response, provider, model=None):
     status = response.status_code
 
     if status == 200:
         try:
             return response.json()
         except ValueError as exc:
-            raise LLMError(f"{provider}: server noto'g'ri JSON qaytardi.") from exc
+            raise LLMError(f"{provider}: server noto'g'ri JSON qaytardi.",
+                           kind="invalid_json", status_code=status, model=model,
+                           provider=provider,
+                           detail=f"response_json_error={type(exc).__name__}") from exc
 
+    kind, label = "http_error", "API so'rov rad etildi"
     if status in (401, 403):
-        raise ProviderAPIError(f"{provider}: API kaliti yoki ruxsat muammosi ({status}).", status)
+        kind, label = "authentication", "API kaliti yoki ruxsat muammosi"
     if status == 402:
-        raise ProviderAPIError(f"{provider}: kredit yoki mablag' limiti yetarli emas (402).", status)
+        kind, label = "payment_required", "kredit yoki mablag' limiti yetarli emas"
     if status == 404:
-        raise LLMError(f"{provider}: model yoki API manzili topilmadi.")
+        kind, label = "model_not_found", "model yoki API manzili topilmadi"
     if status == 429:
-        raise ProviderAPIError(f"{provider}: so'rovlar rate limitiga yetdi (429). Birozdan keyin urinib ko'ring.", status)
+        kind, label = "rate_limit", "so'rovlar rate limitiga yetdi"
     if status >= 500:
-        raise ProviderAPIError(f"{provider}: server vaqtincha ishlamayapti ({status}).", status)
+        kind, label = "server_error", "server vaqtincha ishlamayapti"
+    code, detail = _provider_error_detail(response)
+    if status == 429 and (code.upper() == "RESOURCE_EXHAUSTED" or "quota" in detail.lower()):
+        kind, label = "quota", "kvota tugagan yoki cheklangan"
+    if status == 400 and "model" in detail.lower() and any(
+        phrase in detail.lower() for phrase in ("not found", "unsupported", "does not exist", "not supported")
+    ):
+        kind, label = "model_not_found", "model nomi yoki versiyasi yaroqsiz"
+    model_note = f"; model={model}" if model else ""
+    diagnostic = f"provider_code={code or 'n/a'}; detail={detail or 'no provider detail'}"
+    message = f"{provider}: {label} (HTTP {status}){model_note}."
+    raise ProviderAPIError(message, status, kind=kind, model=model,
+                           provider=provider, detail=diagnostic)
 
-    detail = ""
-    try:
-        detail = str(response.json().get("error", {}).get("message", ""))[:180]
-    except (ValueError, AttributeError, TypeError):
-        pass
-    detail = _redact_secrets(detail)
 
-    raise ProviderAPIError(f"{provider}: HTTP {status}. {detail}", status)
+def _extract_openai_text(data, provider, model=None):
+    if not isinstance(data, dict):
+        raise LLMError(f"{provider}: javob JSON obyekt emas.", kind="invalid_response", model=model)
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise LLMError(f"{provider}: bo'sh javob qaytdi.", kind="empty_response", model=model)
 
-
-def _extract_openai_text(data, provider):
-    choices = data.get("choices") or []
-    if not choices:
-        raise LLMError(f"{provider}: bo'sh javob qaytdi.")
-
-    message = choices[0].get("message") or {}
-    content = message.get("content") or ""
+    if not isinstance(choices[0], dict):
+        raise LLMError(f"{provider}: choices[0] obyekt emas.", kind="invalid_response", model=model)
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise LLMError(f"{provider}: message maydoni topilmadi.", kind="invalid_response", model=model)
+    content = message.get("content")
 
     if isinstance(content, list):
         content = "\n".join(
@@ -177,9 +218,12 @@ def _extract_openai_text(data, provider):
             if isinstance(part, dict)
         )
 
+    elif content is not None and not isinstance(content, str):
+        raise LLMError(f"{provider}: content matn bo'lishi kerak.", kind="invalid_response", model=model)
+
     answer = _clean(content)
     if not answer:
-        raise LLMError(f"{provider}: javob matni bo'sh.")
+        raise LLMError(f"{provider}: javob matni bo'sh.", kind="empty_response", model=model)
 
     return answer
 
@@ -253,8 +297,8 @@ def _chat_groq(messages, system, image_b64=None,
         timeout=_timeout(),
     )
 
-    data = _request_json(response, "Groq")
-    return _extract_openai_text(data, "Groq")
+    data = _request_json(response, "Groq", model=model)
+    return _extract_openai_text(data, "Groq", model=model)
 
 
 # ============================================================
@@ -313,8 +357,8 @@ def _chat_openrouter(messages, system, image_b64=None,
                 json=payload,
                 timeout=_timeout(),
             )
-            data = _request_json(response, "OpenRouter")
-            return _extract_openai_text(data, "OpenRouter")
+            data = _request_json(response, "OpenRouter", model=model)
+            return _extract_openai_text(data, "OpenRouter", model=model)
         except LLMError as exc:
             errors.append(exc)
             log.warning(
@@ -327,9 +371,15 @@ def _chat_openrouter(messages, system, image_b64=None,
     last = errors[-1]
     if all(getattr(error, "status_code", None) == 402 for error in errors):
         raise LLMError(
-            "OpenRouter'dagi sinab ko'rilgan kalitlar kredit yoki mablag' limiti sabab ishlamadi; boshqa kalitda kredit borligi kafolatlanmaydi."
+            "OpenRouter'dagi sinab ko'rilgan kalitlar kredit yoki mablag' limiti sabab ishlamadi; boshqa kalitda kredit borligi kafolatlanmaydi.",
+            kind="payment_required", status_code=402, model=model,
+            provider="openrouter", detail=getattr(last, "detail", ""),
         ) from last
-    raise LLMError(_redact_secrets(str(last))) from last
+    raise LLMError(_redact_secrets(str(last)),
+                   kind=getattr(last, "kind", "provider_error"),
+                   status_code=getattr(last, "status_code", None),
+                   model=model, provider="openrouter",
+                   detail=getattr(last, "detail", "")) from last
 
 
 # ============================================================
@@ -391,13 +441,23 @@ def _chat_gemini(messages, system, image_b64=None,
         timeout=_timeout(),
     )
 
-    data = _request_json(response, "Gemini")
-    candidates = data.get("candidates") or []
+    data = _request_json(response, "Gemini", model=model)
+    if not isinstance(data, dict):
+        raise LLMError("Gemini: javob JSON obyekt emas.", kind="invalid_response", model=model, provider="gemini")
+    candidates = data.get("candidates")
 
-    if not candidates:
-        raise LLMError("Gemini javob qaytarmadi.")
+    if not isinstance(candidates, list) or not candidates:
+        feedback = data.get("promptFeedback")
+        finish_reason = str(feedback.get("blockReason") or "n/a") if isinstance(feedback, dict) else "n/a"
+        raise LLMError("Gemini javob qaytarmadi.", kind="empty_response", model=model,
+                       provider="gemini", detail=f"block_reason={finish_reason}")
 
-    parts = (candidates[0].get("content") or {}).get("parts") or []
+    first = candidates[0]
+    content = first.get("content") if isinstance(first, dict) else None
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(parts, list):
+        raise LLMError("Gemini javobida content.parts ro'yxati yo'q.",
+                       kind="invalid_response", model=model, provider="gemini")
     answer = _clean("".join(
         str(part.get("text") or "")
         for part in parts
@@ -535,13 +595,26 @@ def _call_one(provider, messages, system, image_b64=None,
         "presentation" if task == "presentation" else task,
         max_tokens,
     )
-    return caller(
-        prepared,
-        system,
-        image_b64=image_b64,
-        max_tokens=output_limit,
-        temperature=temperature,
-    )
+    if provider == "groq":
+        model = getattr(config, "VISION_MODEL", config.CHAT_MODEL) if image_b64 else config.CHAT_MODEL
+    elif provider == "openrouter":
+        model = getattr(config, "OPENROUTER_VISION_MODEL", "") if image_b64 else getattr(config, "OPENROUTER_MODEL", "")
+    else:
+        model = getattr(config, "GEMINI_MODEL", "gemini-2.5-flash")
+    try:
+        return caller(
+            prepared,
+            system,
+            image_b64=image_b64,
+            max_tokens=output_limit,
+            temperature=temperature,
+        )
+    except LLMError as exc:
+        if not exc.model:
+            exc.model = model
+        if not exc.provider:
+            exc.provider = provider
+        raise
 
 
 # ============================================================
@@ -579,6 +652,7 @@ def chat(history, user_text, system, image=None,
         raise LLMError("Hech qanday AI API kaliti sozlanmagan.")
 
     errors = []
+    last_error = None
     token_task = "presentation" if is_presentation else task
 
     for provider in providers:
@@ -598,6 +672,7 @@ def chat(history, user_text, system, image=None,
             return answer
 
         except Exception as exc:
+            last_error = exc
             log.warning(
                 "%s ishlamadi: %s",
                 provider,
@@ -608,8 +683,13 @@ def chat(history, user_text, system, image=None,
     raise LLMError(
         "Barcha AI provayderlari ishlamadi: "
         + "; ".join(errors)
-        + ". Kalitlar, model nomlari, kredit va limitlarni tekshiring."
-    )
+        + ". Kalitlar, model nomlari, kredit va limitlarni tekshiring.",
+        kind="all_providers_failed",
+        status_code=getattr(last_error, "status_code", None),
+        model=getattr(last_error, "model", None),
+        provider=getattr(last_error, "provider", None),
+        detail=getattr(last_error, "detail", ""),
+    ) from last_error
 
 
 def chat_multi(history, user_text, system, image=None,

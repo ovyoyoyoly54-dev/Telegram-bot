@@ -14,11 +14,12 @@ log = logging.getLogger("presenton")
 class PresentonError(Exception):
     """Safe service error with diagnostic fields that never contain credentials."""
 
-    def __init__(self, message: str, *, kind: str = "PresentonError", status: int | None = None, detail: str = ""):
+    def __init__(self, message: str, *, kind: str = "PresentonError", status: int | None = None, detail: str = "", endpoint: str = ""):
         super().__init__(message)
         self.kind = kind
         self.status = status
         self.detail = detail
+        self.endpoint = endpoint
 
 
 def _base_url() -> str:
@@ -39,11 +40,18 @@ def _headers() -> dict[str, str]:
 
 
 def _response_detail(response, prompt: str) -> str:
-    """Extract short service diagnostics while scrubbing credentials and user content."""
+    """Extract service diagnostics while scrubbing credentials and request content."""
     try:
         body = response.json()
-        candidates = [body.get(key) for key in ("detail", "message", "error", "code") if isinstance(body, dict)]
-        detail = "; ".join(str(value) for value in candidates if value)
+        if isinstance(body, dict):
+            candidates = [body.get(key) for key in (
+                "detail", "message", "error", "code", "reason", "status", "traceback",
+            )]
+            detail = "; ".join(str(value) for value in candidates if value)
+            if not detail:
+                detail = str(body)
+        else:
+            detail = str(body)
     except (ValueError, AttributeError):
         detail = getattr(response, "text", "") or ""
     detail = re.sub(r"(?i)bearer\s+\S+|sk-presenton-[\w-]+", "[REDACTED]", detail)
@@ -51,12 +59,14 @@ def _response_detail(response, prompt: str) -> str:
         detail = detail.replace(config.PRESENTON_API_KEY, "[REDACTED]")
     if prompt:
         detail = detail.replace(prompt, "[PROMPT REDACTED]")
+    detail = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[EMAIL REDACTED]", detail)
+    detail = re.sub(r"(?<!\w)\+?\d[\d ()-]{7,}\d(?!\w)", "[PHONE REDACTED]", detail)
     detail = re.sub(r"https?://[^\s\"']+", "[URL REDACTED]", detail)
     detail = re.sub(r"[\r\n\t]+", " ", detail)
-    return detail[:300].strip()
+    return detail[:1000].strip()
 
 
-def _raise_http(response, prompt: str, operation: str) -> None:
+def _raise_http(response, prompt: str, operation: str, endpoint: str) -> None:
     status = response.status_code
     detail = _response_detail(response, prompt)
     if status in (401, 403):
@@ -71,7 +81,7 @@ def _raise_http(response, prompt: str, operation: str) -> None:
         message, kind = "Presenton serverida xatolik yuz berdi.", "ServerError"
     else:
         message, kind = f"Presenton {operation} so'rovi bajarilmadi (HTTP {status}).", "HTTPError"
-    raise PresentonError(message, kind=kind, status=status, detail=detail)
+    raise PresentonError(message, kind=kind, status=status, detail=detail, endpoint=endpoint)
 
 
 def generate_presentation(prompt: str, n_slides: int = 8, theme: str = "general", language: str = "Uzbek", export_as: str = "pptx") -> tuple[str, bytes, str]:
@@ -103,9 +113,14 @@ def generate_presentation(prompt: str, n_slides: int = 8, theme: str = "general"
         base_url = _base_url()
         headers = _headers()
         route = "api/v3/presentation/generate" if cloud else "api/v1/ppt/presentation/generate"
-        response = requests.post(urljoin(base_url, route), headers=headers, json=payload, timeout=config.PRESENTON_TIMEOUT)
+        endpoint = urljoin(base_url, route)
+        safe_endpoint = f"{urlparse(endpoint).scheme}://{urlparse(endpoint).netloc}{urlparse(endpoint).path}"
+        log.info("Presenton request: mode=%s endpoint=%s auth=%s fields=%s",
+                 config.PRESENTON_API_MODE, safe_endpoint,
+                 "bearer" if cloud else "none", ",".join(sorted(payload)))
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=config.PRESENTON_TIMEOUT)
         if response.status_code >= 400:
-            _raise_http(response, prompt, "generation")
+            _raise_http(response, prompt, "generation", safe_endpoint)
         try:
             result = response.json()
         except ValueError as exc:
@@ -125,7 +140,8 @@ def generate_presentation(prompt: str, n_slides: int = 8, theme: str = "general"
             download_headers["Authorization"] = headers["Authorization"]
         file_response = requests.get(download_url, headers=download_headers, timeout=config.PRESENTON_TIMEOUT)
         if file_response.status_code >= 400:
-            _raise_http(file_response, prompt, "download")
+            _raise_http(file_response, prompt, "download",
+                        f"{parts.scheme}://{parts.netloc}/[download]")
         data = file_response.content
     except requests.Timeout as exc:
         raise PresentonError("Presenton javobi kutilgan vaqtda kelmadi.", kind="Timeout", detail=type(exc).__name__) from exc

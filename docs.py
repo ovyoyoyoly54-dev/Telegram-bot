@@ -5,6 +5,7 @@ import logging
 import io
 import re
 import time
+import traceback
 from dataclasses import dataclass
 from pptx import Presentation
 
@@ -188,9 +189,10 @@ def generate(
             except presenton.PresentonError as exc:
                 log.warning(
                     "Presenton failed; using internal presentation generator "
-                    "(error_type=%s status=%s detail=%s)",
+                    "(error_type=%s status=%s endpoint=%s detail=%s)",
                     exc.kind,
                     exc.status if exc.status is not None else "n/a",
+                    exc.endpoint or "n/a",
                     exc.detail or "n/a",
                 )
             except Exception as exc:
@@ -370,6 +372,46 @@ def _score_deck(deck_data: dict) -> int:
     return score
 
 
+def _safe_generation_text(value: str, instruction: str, doc: dict | None,
+                          history: list[dict] | None = None) -> str:
+    text = str(value or "")
+    private_values = [instruction, str((doc or {}).get("text") or "")]
+    private_values.extend(
+        str(item.get("content") or "")
+        for item in (history or []) if isinstance(item, dict)
+    )
+    for value in private_values:
+        if value:
+            text = text.replace(value, "[CONTENT REDACTED]")
+    router_keys = getattr(config, "OPENROUTER_API_KEYS", []) or []
+    if isinstance(router_keys, str):
+        router_keys = [router_keys]
+    for secret in (
+        config.PRESENTON_API_KEY,
+        getattr(config, "GROQ_API_KEY", ""),
+        getattr(config, "GEMINI_API_KEY", ""),
+        *router_keys,
+    ):
+        if secret:
+            text = text.replace(secret, "[REDACTED]")
+    text = re.sub(r"(?i)bearer\s+\S+|sk-[\w-]+|AIza[\w-]+", "[REDACTED]", text)
+    text = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[EMAIL REDACTED]", text)
+    text = re.sub(r"(?<!\w)\+?\d[\d ()-]{7,}\d(?!\w)", "[PHONE REDACTED]", text)
+    return text
+
+
+def _safe_generation_trace(exc: Exception, instruction: str, doc: dict | None,
+                           history: list[dict] | None = None) -> str:
+    """Format useful stack diagnostics while removing prompts and credentials."""
+    trace = _safe_generation_text(
+        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        instruction,
+        doc,
+        history,
+    )
+    return trace[-6000:]
+
+
 def _deck_system(doc: dict | None) -> str:
     """Taqdimot uchun qat'iy va tushunarli ko'rsatma tayyorlaydi."""
     system = llm.PRESENTATION_PROMPT
@@ -473,6 +515,9 @@ def _generate_deck(
                         f"Model {expected_slides} o'rniga "
                         f"{len(normalized['slides'])} slayd qaytardi"
                     )
+                quality_issues = _deck_quality_issues(normalized)
+                if quality_issues:
+                    raise ValueError("Slayd sifati tekshiruvi: " + "; ".join(quality_issues[:5]))
 
                 score = _score_deck(normalized)
                 candidates.append((score, normalized, provider))
@@ -485,17 +530,35 @@ def _generate_deck(
                 )
                 break
 
-            except Exception as exc:
+            except (llm.LLMError, deck_mod.DeckError, ValueError) as exc:
                 last_error = exc
-                log.warning(
-                    "Taqdimot yaratish xatosi (%s, urinish %s): %s",
+                safe_trace = _safe_generation_trace(exc, instruction, doc, history)
+                raw_detail = " ".join(filter(None, (getattr(exc, "detail", ""), str(exc))))
+                safe_detail = _safe_generation_text(raw_detail, instruction, doc, history)[:500]
+                log.error(
+                    "Taqdimot nomzodi rad etildi (provider=%s attempt=%s "
+                    "error_type=%s kind=%s status=%s model=%s detail=%s)\n%s",
                     provider,
                     attempt + 1,
                     type(exc).__name__,
+                    getattr(exc, "kind", "n/a"),
+                    getattr(exc, "status_code", "n/a"),
+                    getattr(exc, "model", None) or "n/a",
+                    safe_detail[:300],
+                    safe_trace,
                 )
                 if isinstance(exc, llm.LLMError):
                     # HTTP/provider xatosida JSON-tuzatish urinishini takrorlama.
                     break
+            except Exception as exc:
+                last_error = exc
+                safe_trace = _safe_generation_trace(exc, instruction, doc, history)
+                log.error(
+                    "Taqdimot yaratishda kutilmagan xato (provider=%s attempt=%s error_type=%s); "
+                    "stack=%s",
+                    provider, attempt + 1, type(exc).__name__,
+                    safe_trace,
+                )
 
         if last_error is not None and not any(
             candidate[2] == provider for candidate in candidates
@@ -509,7 +572,25 @@ def _generate_deck(
         raise DocError(f"Taqdimot yaratib bo'lmadi: {details}") from last_error
 
     candidates.sort(key=lambda item: item[0], reverse=True)
-    best_score, best_deck, best_provider = candidates[0]
+    best_score = best_deck = best_provider = None
+    for candidate_score, candidate_deck, candidate_provider in candidates:
+        # Recheck the selected structure so a high score cannot bypass content QA.
+        try:
+            checked = deck_mod.normalize(candidate_deck)
+            issues = _deck_quality_issues(checked)
+            if len(checked["slides"]) != expected_slides or issues:
+                raise ValueError("; ".join(issues[:5]) or "slaydlar soni mos emas")
+        except (deck_mod.DeckError, ValueError) as exc:
+            log.error(
+                "Tanlangan nomzod qayta tekshiruvdan o'tmadi (provider=%s score=%s error_type=%s detail=%s)",
+                candidate_provider, candidate_score, type(exc).__name__,
+                _safe_generation_trace(exc, instruction, doc, history),
+            )
+            continue
+        best_score, best_deck, best_provider = candidate_score, checked, candidate_provider
+        break
+    if best_deck is None:
+        raise DocError("Taqdimot nomzodlarining hech biri yakuniy tuzilma va mazmun tekshiruvidan o'tmadi.")
 
     log.info(
         "Tanlangan taqdimot: provider=%s, score=%s, slaydlar=%s",
