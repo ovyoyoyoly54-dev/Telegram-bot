@@ -25,7 +25,7 @@ from keyboards import MODES
 
 log = logging.getLogger("web")
 
-APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
+APP_PASSWORD = config.APP_PASSWORD
 APP_UID = 10**12 + 7                      # ilova foydalanuvchisi (Telegram ID'lari bilan to'qnashmaydi)
 TOKEN_DAYS = 90
 _SECRET = hashlib.sha256(f"app-v1|{APP_PASSWORD}|{config.TELEGRAM_TOKEN}".encode()).digest()
@@ -159,7 +159,13 @@ def _chat(uid: int, text: str, image: bytes | None = None, label: str | None = N
     doc = docs.get(uid)
     if doc:
         system += docs.context_block(doc)
-    answer = llm.chat(state.get_history(uid), text, system, image)
+    history = state.get_history(uid)
+    # Vaqtga bog'liq savollarga eski model xotirasi bilan javob bermaslik:
+    # botdagi kabi Brave natijalarini tekshirib, manbalar bilan javob beramiz.
+    if image is None and tg._REALTIME_HINT.search(tg._norm(text)):
+        answer = llm.chat_with_search(history, text, system)
+    else:
+        answer = llm.chat(history, text, system, image)
     state.remember(uid, label or text, answer)
     return {"kind": "text", "text": answer}
 
@@ -172,11 +178,15 @@ def _check_quota(uid: int) -> None:
 
 
 def _deliver_image(uid: int, img: bytes, note: str) -> dict:
-    state.count_image(uid)
+    if not img:
+        raise images.ImageError("Rasm xizmati bo'sh natija qaytardi.")
     try:
         state.set_image(uid, images.shrink(img))
     except Exception:  # noqa: BLE001
-        log.warning("Natija rasmini kichraytirib bo'lmadi")
+        log.exception("Natija rasmini qayta ishlashda xato")
+        raise images.ImageError("Yaratilgan rasmni qayta ishlay olmadim. Qayta urinib ko'ring.")
+    state.set_image_prompt(uid, note)
+    state.count_image(uid)
     state.remember(uid, note, "[Rasm yuborildi]")
     name, mime = _img_name(img)
     return {"kind": "image", "url": put_file(name, img, mime), "name": name}
@@ -209,16 +219,44 @@ def _route(uid: int, text: str) -> dict:
     last = state.get_image(uid) if config.IMAGES_ENABLED else None
     doc = docs.get(uid)
     t = tg._norm(text)
-    want_image = config.IMAGES_ENABLED and tg.looks_like_image_request(text, last is not None)
+    previous_prompt = state.get_image_prompt(uid) if config.IMAGES_ENABLED else None
+
+    # Telegram va web ilovasi bir xil, deterministik yo'naltirishdan foydalansin.
+    # Tasniflagich rasm so'rovini chat deb belgilasa ham rasm yaratish davom etadi.
+    if tg.is_presentation_request(text):
+        return _file(uid, text)
+
+    if t.startswith("/qidir"):
+        query = text.partition(" ")[2].strip()
+        if not query:
+            raise ApiError("Qidiruv so'rovini yozing. Masalan: /qidir sun'iy intellekt yangiliklari", 400)
+        if not config.BRAVE_SEARCH_ENABLED:
+            raise ApiError("Internet qidiruvi sozlanmagan. BRAVE_API_KEY ni qo'shing.", 503)
+        system = MODES[state.get_mode(uid)][1]
+        answer = llm.chat_with_search(state.get_history(uid), query, system)
+        state.remember(uid, text, answer)
+        return {"kind": "text", "text": answer}
+
+    if last and previous_prompt and tg._IMAGE_CORRECTION.search(t):
+        prompt = tg._refine_image_correction(previous_prompt, text)
+        return _draw(uid, prompt, text)
+
+    wants_image = tg.looks_like_image_request(text, last is not None)
+    if wants_image:
+        if not config.IMAGES_ENABLED:
+            raise ApiError("Rasm yaratish xizmati sozlanmagan. CF_ACCOUNT_ID va CF_API_TOKEN ni tekshiring.", 503)
+        if last and tg._EDIT_HINT.search(t):
+            return _edit(uid, llm.refine_prompt(text), text)
+        prompt = tg._refine_image_prompt(text)
+        return _draw(uid, prompt, text)
+
     want_file = bool(tg._FILE_HINT.search(t) or (doc and tg._DOCEDIT_HINT.search(t)))
     action, prompt = "chat", ""
-    if want_image or want_file:
+    if want_file:
         try:
             action, prompt = llm.classify(text, last is not None, doc is not None)
         except Exception as exc:  # noqa: BLE001
             log.warning("Tasniflash xatosi: %s", exc)
-        if action in ("draw", "edit") and not config.IMAGES_ENABLED:
-            action = "chat"
     if action == "draw":
         return _draw(uid, prompt, text)
     if action == "edit":
@@ -352,6 +390,11 @@ def index():
     resp = send_from_directory(_asset_dir("index.html"), "index.html")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
+
+@app.get("/healthz")
+def healthz():
+    return Response("ok", mimetype="text/plain")
 
 
 @app.get("/icon.png")

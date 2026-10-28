@@ -14,6 +14,7 @@ Bitta botda: suhbat xotirasi, 4 ta javob rejimi, rasmni tushunish, rasm chizish 
 | Ovozli xabar | Whisper orqali matnga o'giriladi va javob beriladi |
 | Rejimlar | `/mode` — Do'stona, Dasturchi, O'qituvchi, Qisqa |
 | Himoya | `ALLOWED_USERS`, tezlik limiti, kunlik rasm limiti, bir vaqtda bitta so'rov |
+| Web ilova | `APP_PASSWORD` sozlanganda, 8080-portda parol bilan himoyalangan web chat va fayl yuklash |
 
 ## Fayllar
 
@@ -34,6 +35,7 @@ Dockerfile      # Northflank shu orqali quradi
 |---|---|---|
 | `TELEGRAM_TOKEN` | ✅ | @BotFather dan |
 | `GROQ_API_KEY` | ✅ | console.groq.com |
+| `APP_PASSWORD` | ❌ | Ixtiyoriy web ilova paroli. Sozlanganda 8080-portdagi health-check o'rniga web ilova ishlaydi |
 | `CF_ACCOUNT_ID`, `CF_API_TOKEN` | ❌ | Ikkalasi ham berilsa, rasm funksiyalari yoqiladi |
 | `GEMINI_API_KEY` | ❌ | Zaxira (aistudio.google.com/apikey) |
 | `PRESENTON_API_KEY` | ❌ | Sozlanganda `/fayl ... taqdimot` so'rovlari Presenton API orqali PPTX yaratadi; bo'sh bo'lsa ichki generator ishlaydi |
@@ -73,10 +75,10 @@ Repo'ni **private** qiling. `git status` da `.env` ko'rinmasligini tekshiring.
 1. Project yarating → **Add new service** → **Combined service** (GitHub'dan quradi va ishga tushiradi).
 2. **Repository**: GitHub akkauntingizni ulang, repo va `main` branch'ni tanlang.
 3. **Build**: *Dockerfile*, yo'l `/Dockerfile`, kontekst `/`.
-4. **Networking**: port `8080`, protokol HTTP (faqat health-check uchun; public qilish shart emas).
+4. **Networking**: port `8080`, protokol HTTP. `APP_PASSWORD` berilgan bo'lsa web ilova shu portda ochiladi; berilmasa faqat health-check ishlaydi.
 5. **Environment variables** (Runtime variables) bo'limiga yuqoridagi kalitlarni kiriting. Maxfiylarni *secret* sifatida belgilang.
 6. **Resources**: **instances = 1** (muhim!). 0.1–0.2 vCPU va 256 MB odatda yetadi; xotira yetmasa 512 MB qiling.
-7. (Ixtiyoriy) Health check: HTTP, port `8080`, yo'l `/`.
+7. (Ixtiyoriy) Health check: HTTP, port `8080`, yo'l `/healthz`.
 8. **Create service**. Loglarda `@botnomi ishga tushdi | ...` qatori chiqsa, tayyor.
 
 **3. Yangilash**: kodni `git push` qilsangiz, Northflank o'zi qayta quradi va deploy qiladi.

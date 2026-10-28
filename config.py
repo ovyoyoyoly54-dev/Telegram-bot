@@ -61,6 +61,7 @@ def _id_set(name: str) -> set[int]:
 # ================================================================
 
 TELEGRAM_TOKEN = _required("TELEGRAM_TOKEN")
+APP_PASSWORD = _get("APP_PASSWORD")
 
 # Hozirgi llm.py asosiy provayder sifatida Groqni kutadi.
 GROQ_API_KEY = _get("GROQ_API_KEY")

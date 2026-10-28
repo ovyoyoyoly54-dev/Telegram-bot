@@ -871,7 +871,13 @@ def shutdown(signum, _frame):
 def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
-    start_health_server()
+    if config.APP_PASSWORD:
+        # Parol bilan himoyalangan web ilovasi health portda xizmat qiladi.
+        # Parol bo'lmasa, eski yengil health-check serveri ishlayveradi.
+        import web
+        web.start(config.HEALTH_PORT)
+    else:
+        start_health_server()
 
     try:
         bot.remove_webhook()
@@ -897,10 +903,11 @@ def main():
         log.warning("Buyruqlarni o'rnatib bo'lmadi", exc_info=True)
 
     log.info(
-        "Bot ishga tushdi | @%s | Brave=%s | rasm=%s",
+        "Bot ishga tushdi | @%s | Brave=%s | rasm=%s | web=%s",
         me.username,
         "yoqilgan" if config.BRAVE_SEARCH_ENABLED else "kalit yo'q",
         "yoqilgan" if config.IMAGES_ENABLED else "o'chiq",
+        "yoqilgan" if config.APP_PASSWORD else "o'chiq",
     )
     bot.infinity_polling(
         skip_pending=True,
