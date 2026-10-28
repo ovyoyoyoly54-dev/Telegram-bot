@@ -257,6 +257,7 @@ HISTORY_LIMIT = max(2, _int("HISTORY_LIMIT", 10))
 HISTORY_LIMIT -= HISTORY_LIMIT % 2
 
 HISTORY_MSG_CHARS = max(100, _int("HISTORY_MSG_CHARS", 1500))
+HISTORY_TTL_HOURS = max(1, min(_int("HISTORY_TTL_HOURS", 24), 720))
 
 
 # ================================================================

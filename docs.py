@@ -216,6 +216,70 @@ def _pptx_slide_count(data: bytes) -> int:
 # ================================================================
 # TAQDIMOT SIFATINI BAHOLASH
 
+def _slide_content_items(slide: dict) -> list[str]:
+    items = []
+    for key in ("subtitle", "quote", "bullets", "left", "right", "headers"):
+        value = slide.get(key)
+        values = value if isinstance(value, list) else [value]
+        items.extend(str(item).strip() for item in values if isinstance(item, str) and item.strip())
+
+    for row in slide.get("rows") or []:
+        if isinstance(row, list):
+            items.extend(str(cell).strip() for cell in row if str(cell).strip())
+
+    for key in ("steps", "stats"):
+        for item in slide.get(key) or []:
+            if isinstance(item, dict):
+                items.extend(
+                    str(value).strip()
+                    for value in item.values()
+                    if isinstance(value, str) and value.strip()
+                )
+
+    return items
+
+
+def _deck_quality_issues(deck_data: dict) -> list[str]:
+    """Find empty, repeated, or under-explained slides before PPTX export."""
+    slides = deck_data.get("slides") or []
+    issues = []
+    titles = []
+    body_texts = []
+
+    for index, slide in enumerate(slides, 1):
+        title = re.sub(r"\s+", " ", str(slide.get("title") or "")).strip().casefold()
+        if title:
+            titles.append(title)
+
+        items = _slide_content_items(slide)
+        body = re.sub(r"\s+", " ", " ".join(items)).strip().casefold()
+        if body:
+            body_texts.append((index, body))
+
+        if slide.get("layout") not in ("title", "closing"):
+            words = re.findall(r"[^\W_]+", body, flags=re.UNICODE)
+            if len(words) < 9 or len(body) < 50:
+                issues.append(f"{index}-slaydda tushuntirish matni yetarli emas")
+
+        normalized_items = [
+            re.sub(r"\s+", " ", item).strip().casefold()
+            for item in items
+        ]
+        if len(normalized_items) != len(set(normalized_items)):
+            issues.append(f"{index}-slaydda takroriy matn bor")
+
+    if len(titles) != len(set(titles)):
+        issues.append("takrorlangan slayd sarlavhalari bor")
+
+    seen_bodies = set()
+    for index, body in body_texts:
+        if body in seen_bodies:
+            issues.append(f"{index}-slayd oldingi slayd mazmunini takrorlaydi")
+        seen_bodies.add(body)
+
+    return issues
+
+
 def _score_deck(deck_data: dict) -> int:
     """Slaydlar soni, mazmuni va tuzilishiga qarab taxminiy sifat bahosi."""
     slides = deck_data.get("slides") or []
@@ -243,9 +307,9 @@ def _score_deck(deck_data: dict) -> int:
         if layout in ("bullets", "image_text"):
             score += min(len(bullets), 5) * 3
             score += sum(
-                1 for item in bullets
-                if len(str(item).split()) >= 5
-            ) * 2
+                min(len(str(item).split()), 20)
+                for item in bullets
+            )
 
         elif layout == "two_column":
             left = slide.get("left") or []
@@ -383,6 +447,10 @@ def _generate_deck(
                         f"Model {expected_slides} o'rniga "
                         f"{len(normalized['slides'])} slayd qaytardi"
                     )
+
+                quality_issues = _deck_quality_issues(normalized)
+                if quality_issues:
+                    raise ValueError("; ".join(quality_issues[:3]))
 
                 score = _score_deck(normalized)
                 candidates.append((score, normalized, provider))

@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-os.environ.setdefault("TELEGRAM_TOKEN", "test-token")
+os.environ.setdefault("TELEGRAM_TOKEN", "123456:test-token")
 os.environ.setdefault("GROQ_API_KEY", "test-key")
 
 from pptx import Presentation
@@ -29,6 +29,32 @@ def _sample_pptx(slide_count=12):
 
 
 class PresentationRoutingTests(unittest.TestCase):
+    def test_deck_quality_flags_short_and_repeated_content(self):
+        short = {
+            "slides": [
+                {"layout": "bullets", "title": "Asosiy tushuncha", "bullets": ["Sun'iy intellekt"]},
+                {"layout": "bullets", "title": "Asosiy tushuncha", "bullets": ["Sun'iy intellekt"]},
+            ]
+        }
+
+        issues = docs._deck_quality_issues(short)
+
+        self.assertTrue(any("tushuntirish matni yetarli emas" in issue for issue in issues))
+        self.assertTrue(any("takrorlangan slayd sarlavhalari" in issue for issue in issues))
+        self.assertTrue(any("oldingi slayd mazmunini takrorlaydi" in issue for issue in issues))
+
+    def test_deck_score_rewards_explanatory_bullets(self):
+        brief = {"slides": [{"layout": "bullets", "title": "Mavzu", "bullets": ["AI foydali."]}]}
+        detailed = {
+            "slides": [{
+                "layout": "bullets",
+                "title": "Mavzu",
+                "bullets": ["Sun'iy intellekt katta ma'lumotlardan andozalarni topib, qaror qabul qilishga yordam beradi."],
+            }]
+        }
+
+        self.assertGreater(docs._score_deck(detailed), docs._score_deck(brief))
+
     def test_uploaded_file_summary_request_includes_document_context(self):
         message = type("Message", (), {
             "from_user": type("User", (), {"id": 42})(),

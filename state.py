@@ -19,6 +19,7 @@ saqlangan ma'lumotlar yo'qoladi.
 
 import copy
 import os
+import re
 import threading
 import time
 
@@ -57,6 +58,7 @@ DOC_TTL_SECONDS = DOC_TTL_MIN * 60
 _lock = threading.RLock()
 
 _history: OrderedDict = OrderedDict()
+_history_updated: OrderedDict = OrderedDict()
 _modes: OrderedDict = OrderedDict()
 _images: OrderedDict = OrderedDict()
 _image_prompts: OrderedDict = OrderedDict()
@@ -74,6 +76,16 @@ _user_locks: OrderedDict = OrderedDict()
 # Botga yozgan foydalanuvchilar.
 # Bot qayta ishga tushganda bu ro'yxat ham tozalanadi.
 _seen: OrderedDict = OrderedDict()
+
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(api[_ -]?key|token|password|passphrase|secret)\b"
+    r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+)
+_SECRET_FORMAT = re.compile(
+    r"(?i)\b(?:Bearer\s+[A-Za-z0-9._~+/-]+=*|"
+    r"sk-or-v1-[A-Za-z0-9_-]{16,}|gsk_[A-Za-z0-9_-]{16,}|"
+    r"AIza[A-Za-z0-9_-]{20,}|\d{6,}:[A-Za-z0-9_-]{20,})"
+)
 
 
 # ============================================================
@@ -119,6 +131,34 @@ def _file_expired(file_data: dict, now: float | None = None) -> bool:
     return age >= DOC_TTL_SECONDS
 
 
+def _redact_secrets(text: str) -> str:
+    text = _SECRET_ASSIGNMENT.sub(r"\1\2[REDACTED]", str(text or ""))
+    text = _SECRET_FORMAT.sub("[REDACTED]", text)
+    secret_names = (
+        "TELEGRAM_TOKEN", "APP_PASSWORD", "GROQ_API_KEY",
+        "OPENROUTER_API_KEY_1", "OPENROUTER_API_KEY_2",
+        "OPENROUTER_API_KEY_LEGACY", "OPENROUTER_API_KEY",
+        "GEMINI_API_KEY", "BRAVE_API_KEY", "CF_API_TOKEN",
+        "PRESENTON_API_KEY",
+    )
+    secrets = [getattr(config, name, "") for name in secret_names]
+    secrets.extend(getattr(config, "OPENROUTER_API_KEYS", []) or [])
+    for secret in secrets:
+        if secret:
+            text = text.replace(str(secret), "[REDACTED]")
+    return text
+
+
+def _history_expired(uid: int, now: float | None = None) -> bool:
+    updated = _history_updated.get(uid)
+    if not isinstance(updated, (int, float)):
+        return bool(_history.get(uid))
+    if now is None:
+        now = time.monotonic()
+    age = now - updated
+    return age < 0 or age >= max(1, config.HISTORY_TTL_HOURS) * 3600
+
+
 def cleanup_expired() -> int:
     """Muddati tugagan hujjatlarni o'chiradi.
 
@@ -129,6 +169,12 @@ def cleanup_expired() -> int:
     removed = 0
 
     with _lock:
+        for uid in list(_history):
+            if _history_expired(uid, now):
+                _history.pop(uid, None)
+                _history_updated.pop(uid, None)
+                removed += 1
+
         for uid, file_data in list(_files.items()):
             if _file_expired(file_data, now):
                 _files.pop(uid, None)
@@ -145,7 +191,13 @@ def cleanup_expired() -> int:
 def get_history(uid: int) -> list[dict]:
     """Suhbat tarixining nusxasini qaytaradi."""
     with _lock:
+        if _history_expired(uid):
+            _history.pop(uid, None)
+            _history_updated.pop(uid, None)
+            return []
         history = _history.get(uid, [])
+        if history:
+            _history_updated.move_to_end(uid)
         return copy.deepcopy(history)
 
 
@@ -153,8 +205,8 @@ def remember(uid: int, user_text: str, answer: str) -> None:
     """Muvaffaqiyatli savol-javob juftligini tarixga qo'shadi."""
     cut = max(100, getattr(config, "HISTORY_MSG_CHARS", 1500))
 
-    user_text = str(user_text or "")[:cut]
-    answer = str(answer or "")[:cut]
+    user_text = _redact_secrets(user_text)[:cut]
+    answer = _redact_secrets(answer)[:cut]
 
     with _lock:
         history = list(_history.get(uid, []))
@@ -175,12 +227,14 @@ def remember(uid: int, user_text: str, answer: str) -> None:
         history = history[-limit:]
 
         _put(_history, uid, history, USERS_CAP)
+        _put(_history_updated, uid, time.monotonic(), USERS_CAP)
 
 
 def clear_history(uid: int) -> None:
     """Suhbat tarixini va vaqtinchalik media kontekstini tozalaydi."""
     with _lock:
         _history.pop(uid, None)
+        _history_updated.pop(uid, None)
         _images.pop(uid, None)
         _image_prompts.pop(uid, None)
         _files.pop(uid, None)
