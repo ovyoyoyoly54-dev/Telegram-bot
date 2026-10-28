@@ -44,19 +44,57 @@ def _response_detail(response, prompt: str) -> str:
     """Extract service diagnostics while scrubbing credentials and request content."""
     try:
         body = response.json()
-        detail = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+        body = _sanitize_response_value(body, prompt)
+        detail = json.dumps(body, ensure_ascii=False, separators=(",", ":"), default=str)
     except (ValueError, AttributeError):
         detail = getattr(response, "text", "") or ""
-    detail = re.sub(r"(?i)bearer\s+\S+|sk-presenton-[\w-]+", "[REDACTED]", detail)
+    return _sanitize_response_text(detail, prompt)[:1600].strip()
+
+
+def _sanitize_response_value(value, prompt: str, field: str = ""):
+    if re.search(r"(?i)(api.?key|token|secret|authorization|password|credential|cookie|email|phone|user.?id|content|prompt)", field):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {str(key): _sanitize_response_value(item, prompt, str(key)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_response_value(item, prompt, field) for item in value]
+    if isinstance(value, str):
+        return _sanitize_response_text(value, prompt)
+    return value
+
+
+def _sanitize_response_text(value: str, prompt: str) -> str:
+    detail = str(value or "")
     if config.PRESENTON_API_KEY:
         detail = detail.replace(config.PRESENTON_API_KEY, "[REDACTED]")
     if prompt:
         detail = detail.replace(prompt, "[PROMPT REDACTED]")
+    detail = re.sub(r"(?i)bearer\s+\S+|sk-presenton-[\w-]+|sk-[\w-]+|AIza[\w-]+", "[REDACTED]", detail)
     detail = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[EMAIL REDACTED]", detail)
     detail = re.sub(r"(?<!\w)\+?\d[\d ()-]{7,}\d(?!\w)", "[PHONE REDACTED]", detail)
     detail = re.sub(r"https?://[^\s\"']+", "[URL REDACTED]", detail)
-    detail = re.sub(r"[\r\n\t]+", " ", detail)
-    return detail[:1000].strip()
+    return re.sub(r"[\r\n\t]+", " ", detail)
+
+
+def _slide_count(value) -> int:
+    if isinstance(value, bool):
+        value = 8
+    elif isinstance(value, int):
+        pass
+    elif isinstance(value, str) and re.fullmatch(r"\s*\d+\s*", value):
+        value = int(value)
+    else:
+        value = 8
+    return max(5, min(value, 20))
+
+
+def _template_id(value) -> str:
+    template = value.strip() if isinstance(value, str) else ""
+    if template in {"general", "modern", "standard", "swift"}:
+        return template
+    if re.fullmatch(r"custom-[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", template):
+        return template
+    return "general"
 
 
 def _raise_http(response, prompt: str, operation: str, endpoint: str) -> None:
@@ -82,7 +120,9 @@ def _raise_http(response, prompt: str, operation: str, endpoint: str) -> None:
 
 def generate_presentation(prompt: str, n_slides: int = 8, theme: str = "general", language: str = "Uzbek", export_as: str = "pptx") -> tuple[str, bytes, str]:
     """Create a PPTX using the configured Presenton deployment."""
-    prompt = (prompt or "").strip()
+    if not isinstance(prompt, str):
+        raise PresentonError("Taqdimot mavzusi matn bo'lishi kerak.", kind="InputError", detail="prompt type must be string")
+    prompt = prompt.strip()
     if not prompt:
         raise PresentonError("Taqdimot mavzusi bo'sh bo'lishi mumkin emas.", kind="InputError")
     export_as = "pptx"
@@ -101,15 +141,10 @@ def generate_presentation(prompt: str, n_slides: int = 8, theme: str = "general"
         "takroriy fon va bir xil sahna ishlatmang. Mavzuga aloqasiz yoki "
         "tekshirilmagan faktlarni qo'shmang."
     )
-    try:
-        slides = int(n_slides)
-    except (TypeError, ValueError, OverflowError):
-        slides = 8
-    slides = max(5, min(slides, 20))
+    slides = _slide_count(n_slides)
     language = language.strip() if isinstance(language, str) else ""
-    language = language or "Uzbek"
-    theme = theme.strip() if isinstance(theme, str) else ""
-    theme = theme or "general"
+    language = (language or "Uzbek")[:64]
+    theme = _template_id(theme)
     cloud = config.PRESENTON_API_MODE == "cloud"
     payload = {"content": detailed_content, "n_slides": slides, "language": language,
                ("standard_template" if cloud else "template"): theme, "export_as": export_as}
