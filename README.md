@@ -49,7 +49,6 @@ Dockerfile      # Northflank shu orqali quradi
 | `CHAT_MAX_TOKENS`, `FILE_MAX_TOKENS`, `PRESENTATION_MAX_TOKENS` | ❌ | Har vazifa uchun chiqish token limiti; runtime prompt va model kontekst sig'imiga qarab limitni yana pasaytiradi |
 | `GROQ_CONTEXT_TOKENS`, `OPENROUTER_CONTEXT_TOKENS`, `GEMINI_CONTEXT_TOKENS` | ❌ | Model/provider kontekst oynasi uchun konservativ taxmin; modelga mos qiymat belgilang |
 | `REASONING_EFFORT` | ❌ | `low` (standart) / `medium` / `high` — token tejash uchun past |
-| `HISTORY_LIMIT`, `HISTORY_MSG_CHARS`, `HISTORY_TTL_HOURS` | ❌ | Xotiradagi juft xabarlar soni, har bir xabar uzunligi va tarixning RAM'da saqlanish muddati |
 | `WORKERS` | ❌ | Bir vaqtda ishlov beriladigan xabarlar (standart 8) |
 
 > ⚠️ Kalitlarni **hech qachon** GitHub'ga yoki zip'ga qo'shmang. `.env` `.gitignore` va `.dockerignore` da.
@@ -92,7 +91,7 @@ Repo'ni **private** qiling. `git status` da `.env` ko'rinmasligini tekshiring.
 - **«So'rovlar limiti tugadi»** — Groq/Gemini limiti. `GEMINI_API_KEY` ni qo'shing yoki `CHAT_MODEL=llama-3.1-8b-instant` qiling (kunlik limiti kattaroq), `HISTORY_LIMIT` ni kamaytiring.
 - **«Rasmni o'qib bo'lmadi» / «model topilmadi»** — `VISION_MODEL` nomini Groq konsolidagi mavjud modellar ro'yxati bilan solishtiring.
 - **Bot hamma uchun ochiq** — `ALLOWED_USERS` ni to'ldiring, aks holda boshqalar kvotangizni ishlatadi.
-- Xotira (suhbat tarixi) RAM'da: qayta deploy/restart qilinsa tozalanadi; ish jarayonida `HISTORY_TTL_HOURS` (standart 24 soat) dan keyin ham o'chadi. API kalitlari va tokenlar tarixga yozilishidan oldin niqoblanadi.
+- Xotira (suhbat tarixi) RAM'da: qayta deploy qilinsa tozalanadi. Bu kutilgan holat.
 
 
 ## Suhbat tarixi va saqlash

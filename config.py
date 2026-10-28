@@ -131,8 +131,13 @@ PRESENTON_API_KEY = _get("PRESENTON_API_KEY")
 PRESENTON_BASE_URL = _get(
     "PRESENTON_BASE_URL", "https://api.presenton.ai"
 ).rstrip("/")
+PRESENTON_API_MODE = _get("PRESENTON_API_MODE", "cloud").lower()
+if PRESENTON_API_MODE not in ("cloud", "self_hosted"):
+    raise SystemExit("PRESENTON_API_MODE qiymati cloud yoki self_hosted bo'lishi kerak.")
 PRESENTON_TIMEOUT = max(10, min(_int("PRESENTON_TIMEOUT", 300), 600))
-PRESENTON_ENABLED = bool(PRESENTON_API_KEY)
+PRESENTON_ENABLED = bool(PRESENTON_BASE_URL) and (
+    PRESENTON_API_MODE == "self_hosted" or bool(PRESENTON_API_KEY)
+)
 
 PROVIDERS = ("groq", "openrouter", "gemini")
 
@@ -257,7 +262,6 @@ HISTORY_LIMIT = max(2, _int("HISTORY_LIMIT", 10))
 HISTORY_LIMIT -= HISTORY_LIMIT % 2
 
 HISTORY_MSG_CHARS = max(100, _int("HISTORY_MSG_CHARS", 1500))
-HISTORY_TTL_HOURS = max(1, min(_int("HISTORY_TTL_HOURS", 24), 720))
 
 
 # ================================================================

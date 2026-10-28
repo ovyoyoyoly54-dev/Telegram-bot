@@ -31,28 +31,6 @@ class StateHistoryTests(unittest.TestCase):
         self.assertEqual(len(history), 4)
         self.assertEqual([m["content"] for m in history], ["q3", "a3", "q4", "a4"])
 
-    def test_expired_history_is_removed(self):
-        state.clear_history(101)
-        with patch.object(state.config, "HISTORY_TTL_HOURS", 1), patch.object(state.time, "monotonic", return_value=100):
-            state.remember(101, "question", "answer")
-        with patch.object(state.config, "HISTORY_TTL_HOURS", 1), patch.object(state.time, "monotonic", return_value=3701):
-            self.assertEqual(state.get_history(101), [])
-            self.assertEqual(state.cleanup_expired(), 0)
-
-    def test_history_redacts_credentials(self):
-        state.clear_history(101)
-        with patch.object(state.config, "OPENROUTER_API_KEY_1", "router-secret"):
-            state.remember(
-                101,
-                "OPENROUTER_API_KEY_1=router-secret password=hunter2",
-                "Bearer router-secret",
-            )
-
-        stored = " ".join(item["content"] for item in state.get_history(101))
-        self.assertNotIn("router-secret", stored)
-        self.assertNotIn("hunter2", stored)
-        self.assertIn("[REDACTED]", stored)
-
     def test_file_ttl_expiry_and_cleanup(self):
         with patch.object(state, "DOC_TTL_SECONDS", 60), patch.object(state.time, "monotonic", return_value=100):
             state.set_file(101, "a.txt", "secret A")

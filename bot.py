@@ -376,7 +376,7 @@ def do_chat(message, text, image=None, label=None):
     uploaded_doc = docs.get(user_id)
     if uploaded_doc and (
         _DOCEDIT_HINT.search(_norm(text))
-        or re.search(r"\b(fayl\w*|hujjat\w*|undagi|mazmun\w*)\b", _norm(text))
+        or re.search(r"\b(fayl|hujjat|shu hujjat|bu hujjat|undagi|mazmuni)\b", _norm(text))
     ):
         system += docs.context_block(uploaded_doc)
 

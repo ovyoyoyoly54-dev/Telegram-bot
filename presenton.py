@@ -1,4 +1,4 @@
-"""Presenton cloud API client for generating downloadable presentations."""
+"""Presenton Cloud and self-hosted presentation API client."""
 
 import logging
 import re
@@ -12,30 +12,73 @@ log = logging.getLogger("presenton")
 
 
 class PresentonError(Exception):
-    """Safe, user-facing Presenton service error."""
+    """Safe service error with diagnostic fields that never contain credentials."""
+
+    def __init__(self, message: str, *, kind: str = "PresentonError", status: int | None = None, detail: str = ""):
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
+        self.detail = detail
+
+
+def _base_url() -> str:
+    raw = (config.PRESENTON_BASE_URL or "").strip()
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+        raise PresentonError("Presenton base URL noto'g'ri.", kind="InvalidURL", detail="PRESENTON_BASE_URL must be an http(s) URL without embedded credentials")
+    return raw.rstrip("/") + "/"
 
 
 def _headers() -> dict[str, str]:
-    if not config.PRESENTON_API_KEY:
-        raise PresentonError("Presenton xizmati sozlanmagan.")
-    return {
-        "Authorization": f"Bearer {config.PRESENTON_API_KEY}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if config.PRESENTON_API_MODE == "cloud":
+        if not config.PRESENTON_API_KEY:
+            raise PresentonError("Presenton xizmati sozlanmagan.", kind="ConfigurationError", detail="Cloud mode requires PRESENTON_API_KEY")
+        headers["Authorization"] = f"Bearer {config.PRESENTON_API_KEY}"
+    return headers
 
 
-def generate_presentation(
-    prompt: str,
-    n_slides: int = 8,
-    theme: str = "general",
-    language: str = "Uzbek",
-    export_as: str = "pptx",
-) -> tuple[str, bytes, str]:
-    """Create a presentation with Presenton's synchronous API and download it."""
+def _response_detail(response, prompt: str) -> str:
+    """Extract short service diagnostics while scrubbing credentials and user content."""
+    try:
+        body = response.json()
+        candidates = [body.get(key) for key in ("detail", "message", "error", "code") if isinstance(body, dict)]
+        detail = "; ".join(str(value) for value in candidates if value)
+    except (ValueError, AttributeError):
+        detail = getattr(response, "text", "") or ""
+    detail = re.sub(r"(?i)bearer\s+\S+|sk-presenton-[\w-]+", "[REDACTED]", detail)
+    if config.PRESENTON_API_KEY:
+        detail = detail.replace(config.PRESENTON_API_KEY, "[REDACTED]")
+    if prompt:
+        detail = detail.replace(prompt, "[PROMPT REDACTED]")
+    detail = re.sub(r"https?://[^\s\"']+", "[URL REDACTED]", detail)
+    detail = re.sub(r"[\r\n\t]+", " ", detail)
+    return detail[:300].strip()
+
+
+def _raise_http(response, prompt: str, operation: str) -> None:
+    status = response.status_code
+    detail = _response_detail(response, prompt)
+    if status in (401, 403):
+        message, kind = "Presenton API kaliti noto'g'ri yoki ruxsatsiz.", "AuthenticationError"
+    elif status == 404:
+        message, kind = "Presenton endpoint yoki fayl topilmadi.", "EndpointNotFound"
+    elif status == 422:
+        message, kind = "Presenton so'rov formatini qabul qilmadi.", "ValidationError"
+    elif status == 429:
+        message, kind = "Presenton so'rovlar limiti tugadi.", "RateLimitError"
+    elif 500 <= status <= 599:
+        message, kind = "Presenton serverida xatolik yuz berdi.", "ServerError"
+    else:
+        message, kind = f"Presenton {operation} so'rovi bajarilmadi (HTTP {status}).", "HTTPError"
+    raise PresentonError(message, kind=kind, status=status, detail=detail)
+
+
+def generate_presentation(prompt: str, n_slides: int = 8, theme: str = "general", language: str = "Uzbek", export_as: str = "pptx") -> tuple[str, bytes, str]:
+    """Create a PPTX using the configured Presenton deployment."""
     prompt = (prompt or "").strip()
     if not prompt:
-        raise PresentonError("Taqdimot mavzusi bo'sh bo'lishi mumkin emas.")
+        raise PresentonError("Taqdimot mavzusi bo'sh bo'lishi mumkin emas.", kind="InputError")
     export_as = "pptx"
     detailed_content = (
         f"Foydalanuvchi mavzusi: {prompt}\n\n"
@@ -52,64 +95,47 @@ def generate_presentation(
         "takroriy fon va bir xil sahna ishlatmang. Mavzuga aloqasiz yoki "
         "tekshirilmagan faktlarni qo'shmang."
     )
-
-    payload = {
-        "content": detailed_content,
-        "n_slides": max(5, min(int(n_slides), 20)),
-        "language": "Uzbek",
-        "standard_template": "general",
-        "export_as": export_as,
-    }
-    base_url = config.PRESENTON_BASE_URL.rstrip("/") + "/"
+    slides = max(5, min(int(n_slides), 20))
+    cloud = config.PRESENTON_API_MODE == "cloud"
+    payload = {"content": detailed_content, "n_slides": slides, "language": language,
+               ("standard_template" if cloud else "template"): theme, "export_as": export_as}
     try:
-        response = requests.post(
-            urljoin(base_url, "api/v3/presentation/generate"),
-            headers=_headers(), json=payload, timeout=config.PRESENTON_TIMEOUT,
-        )
+        base_url = _base_url()
+        headers = _headers()
+        route = "api/v3/presentation/generate" if cloud else "api/v1/ppt/presentation/generate"
+        response = requests.post(urljoin(base_url, route), headers=headers, json=payload, timeout=config.PRESENTON_TIMEOUT)
         if response.status_code >= 400:
-            log.warning("Presenton generation failed with HTTP %s", response.status_code)
-            if response.status_code in (401, 403):
-                raise PresentonError("Presenton API kaliti noto'g'ri yoki ruxsatsiz.")
-            if response.status_code == 429:
-                raise PresentonError("Presenton so'rovlar limiti tugadi.")
-            raise PresentonError(f"Presenton taqdimotni yarata olmadi (HTTP {response.status_code}).")
-        result = response.json()
+            _raise_http(response, prompt, "generation")
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise PresentonError("Presenton noto'g'ri javob qaytardi.", kind="InvalidResponse", detail="Response was not valid JSON") from exc
         if not isinstance(result, dict):
-            raise PresentonError("Presenton noto'g'ri javob qaytardi.")
+            raise PresentonError("Presenton noto'g'ri javob qaytardi.", kind="InvalidResponse", detail="Expected a JSON object")
         file_path = result.get("path")
         if not isinstance(file_path, str) or not file_path.strip():
-            raise PresentonError("Presenton fayl manzilini qaytarmadi.")
-
+            raise PresentonError("Presenton fayl manzilini qaytarmadi.", kind="InvalidResponse", detail="Missing path in successful response")
         download_url = urljoin(base_url, file_path)
-        file_parts = urlparse(download_url)
-        base_parts = urlparse(base_url)
-        if (
-            file_parts.scheme != "https"
-            or file_parts.hostname != base_parts.hostname
-            or file_parts.port != base_parts.port
-            or file_parts.username
-            or file_parts.password
-        ):
-            raise PresentonError("Presenton xavfsiz fayl manzilini qaytarmadi.")
-        file_response = requests.get(
-            download_url, headers={"Authorization": f"Bearer {config.PRESENTON_API_KEY}"},
-            timeout=config.PRESENTON_TIMEOUT,
-        )
-        file_response.raise_for_status()
+        parts, base = urlparse(download_url), urlparse(base_url)
+        if (parts.scheme != base.scheme or parts.hostname != base.hostname or parts.port != base.port
+                or parts.username or parts.password):
+            raise PresentonError("Presenton xavfsiz fayl manzilini qaytarmadi.", kind="InvalidDownloadURL", detail="Returned file URL is outside PRESENTON_BASE_URL origin")
+        download_headers = {"Accept": "application/octet-stream"}
+        if cloud:
+            download_headers["Authorization"] = headers["Authorization"]
+        file_response = requests.get(download_url, headers=download_headers, timeout=config.PRESENTON_TIMEOUT)
+        if file_response.status_code >= 400:
+            _raise_http(file_response, prompt, "download")
         data = file_response.content
     except requests.Timeout as exc:
-        raise PresentonError("Presenton javobi kutilgan vaqtda kelmadi.") from exc
+        raise PresentonError("Presenton javobi kutilgan vaqtda kelmadi.", kind="Timeout", detail=type(exc).__name__) from exc
+    except requests.exceptions.InvalidURL as exc:
+        raise PresentonError("Presenton URL noto'g'ri.", kind="InvalidURL", detail="Requests rejected the configured URL") from exc
     except requests.RequestException as exc:
-        log.warning("Presenton network/download error: %s", type(exc).__name__)
-        raise PresentonError("Presenton xizmatiga ulanib bo'lmadi.") from exc
-    except ValueError as exc:
-        raise PresentonError("Presenton noto'g'ri javob qaytardi.") from exc
+        raise PresentonError("Presenton xizmatiga ulanib bo'lmadi.", kind="NetworkError", detail=type(exc).__name__) from exc
 
     if not data:
-        raise PresentonError("Presenton bo'sh fayl qaytardi.")
-
+        raise PresentonError("Presenton bo'sh fayl qaytardi.", kind="InvalidFile", detail="Downloaded file was empty")
     title = str(result.get("title") or prompt.splitlines()[0])[:100]
     safe_title = re.sub(r"[^\w -]", "", title, flags=re.UNICODE).strip() or "taqdimot"
-    filename = f"{safe_title}.{export_as}"
-    summary = f"Presenton orqali tayyorlandi: {payload['n_slides']} slayd, «{title}»."
-    return filename, data, summary
+    return f"{safe_title}.{export_as}", data, f"Presenton orqali tayyorlandi: {slides} slayd, «{title}» .".replace("» .", "».")
